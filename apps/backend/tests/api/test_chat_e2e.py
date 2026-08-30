@@ -109,3 +109,24 @@ def test_chat_hey_uses_fake_llm_and_does_not_require_tool_execution(
     assert "GARL is running" in body["data"]["response"]
     state = fake_conversation_service.agent.get_state("fake-hey")
     assert [result.tool for result in state.execution.history] == ["llm"]
+
+
+def test_chat_calculator_objective_executes_registered_tool(
+    fake_conversation_service,
+):
+    app.dependency_overrides[get_conversation_service] = (
+        lambda: fake_conversation_service
+    )
+    try:
+        client = TestClient(app)
+        response = client.post(
+            "/api/v1/chat",
+            json={"conversation_id": "fake-calc", "message": "calculate 2 + 2"},
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert "4" in response.json()["data"]["response"]
+    state = fake_conversation_service.agent.get_state("fake-calc")
+    assert [result.tool for result in state.execution.history] == ["calculator"]

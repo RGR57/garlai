@@ -236,6 +236,20 @@ class FakeLLMProvider:
             )
 
         if "return only a valid garl execution plan" in normalized:
+            if "calculate 2 + 2" in normalized:
+                return json.dumps(
+                    {
+                        "steps": [
+                            {
+                                "action": "calculate arithmetic result",
+                                "tool": "calculator",
+                                "input": "2 + 2",
+                                "arguments": {"query": "2 + 2"},
+                            }
+                        ]
+                    }
+                )
+
             return json.dumps(
                 {
                     "steps": [
