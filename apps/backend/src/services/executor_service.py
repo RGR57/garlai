@@ -197,6 +197,24 @@ class ExecutorService:
 
         if (
             permission.decision
+            == PermissionDecision.DENY
+        ):
+
+            return StepResult(
+                step_id=step.id,
+                success=False,
+                error=permission.reason,
+                tool=step.tool,
+                action=step.action,
+                metadata={
+                    "permission_decision": (
+                        permission.decision.value
+                    ),
+                },
+            )
+
+        if (
+            permission.decision
             == PermissionDecision.REQUIRE_APPROVAL
         ):
 

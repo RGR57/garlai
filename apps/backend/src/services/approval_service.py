@@ -38,14 +38,6 @@ class ApprovalService:
             logger.error(
                 "Approval state is incomplete."
             )
-            state.record_approval(
-            decision="approved",
-            result=str(tool_result.output),
-        )
-            state.record_approval(
-            decision="rejected",
-            result="User rejected the pending action.",
-        )
 
             state.clear_approval()
 
@@ -77,6 +69,11 @@ class ApprovalService:
 
             logger.error(error)
 
+            state.record_approval(
+                decision="approved",
+                result=error,
+            )
+
             state.clear_approval()
 
             return error
@@ -102,6 +99,11 @@ class ApprovalService:
             logger.error(
                 f"Approved action validation failed: "
                 f"{error}"
+            )
+
+            state.record_approval(
+                decision="approved",
+                result=error,
             )
 
             state.clear_approval()
@@ -134,7 +136,13 @@ class ApprovalService:
                     step_id=step_id,
                     success=False,
                     error=error,
+                    tool=tool_name,
                 )
+            )
+
+            state.record_approval(
+                decision="approved",
+                result=error,
             )
 
             state.clear_approval()
@@ -173,7 +181,13 @@ class ApprovalService:
                     success=False,
                     output=tool_result.output,
                     error=error,
+                    tool=tool_name,
                 )
+            )
+
+            state.record_approval(
+                decision="approved",
+                result=error,
             )
 
             state.clear_approval()
@@ -189,12 +203,18 @@ class ApprovalService:
                 step_id=step_id,
                 success=True,
                 output=tool_result.output,
+                tool=tool_name,
             )
         )
 
         state.variables[
             f"step{step_id}"
         ] = tool_result.output
+
+        state.record_approval(
+            decision="approved",
+            result=str(tool_result.output),
+        )
 
         state.clear_approval()
 
@@ -221,6 +241,11 @@ class ApprovalService:
             f"User rejected pending action: "
             f"tool={tool_name}, "
             f"arguments={arguments}"
+        )
+
+        state.record_approval(
+            decision="rejected",
+            result="User rejected the pending action.",
         )
 
         state.clear_approval()

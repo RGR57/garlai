@@ -60,6 +60,18 @@ class DecisionService:
 
         normalized_error = error.lower()
 
+        if (
+            last.metadata.get("permission_decision")
+            == "deny"
+        ):
+            return Decision(
+                action=DecisionType.RETURN,
+                reason=(
+                    "The requested action was blocked by "
+                    f"the permission policy: {error}"
+                ),
+            )
+
         # ======================================================
         # REPLAN CONDITIONS
         # ======================================================

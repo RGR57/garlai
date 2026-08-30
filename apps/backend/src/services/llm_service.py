@@ -1,11 +1,19 @@
 from typing import Any
 
-from litellm import acompletion
-
 from src.core.config import settings
+from src.services.llm_providers import (
+    LiteLLMProvider,
+    LLMProvider,
+)
+from src.services.llm_errors import LLMMalformedResponseError
 
 
 class LLMService:
+    def __init__(
+        self,
+        provider: LLMProvider | None = None,
+    ):
+        self.provider = provider or LiteLLMProvider(settings)
 
     async def generate(
         self,
@@ -23,17 +31,19 @@ class LLMService:
         - This service performs exactly one LLM inference.
         """
 
-        response = await acompletion(
-            model=settings.MODEL_NAME,
-            api_key=settings.GROQ_API_KEY,
+        response = await self.provider.generate(
             messages=messages,
             temperature=temperature,
             max_tokens=max_tokens,
         )
 
-        content = response.choices[0].message.content
+        if not isinstance(response, str):
+            raise LLMMalformedResponseError(
+                "The LLM provider returned a malformed response.",
+                code="malformed_response",
+                provider="injected",
+                model=None,
+                retryable=False,
+            )
 
-        if content is None:
-            return ""
-
-        return content.strip()
+        return response

@@ -104,6 +104,11 @@ class CognitivePipeline:
             response="",
         )
 
+        final_response = (
+            state.final_response
+            or "Execution did not produce a final response."
+        )
+
         # ======================================================
         # REASONING
         # ======================================================
@@ -449,6 +454,10 @@ class CognitivePipeline:
                     chat_response.response
                 )
 
+                final_response = (
+                    state.final_response
+                )
+
                 state.artifacts = (
                     chat_response.artifacts
                 )
@@ -461,6 +470,10 @@ class CognitivePipeline:
 
                 state.final_response = (
                     review_response
+                )
+
+                final_response = (
+                    state.final_response
                 )
             # ==================================================
             # SUCCESS
@@ -568,6 +581,10 @@ class CognitivePipeline:
                     f"{state.execution.approval_reason}"
                 )
 
+                state.final_response = (
+                    final_response
+                )
+
                 logger.info(
                     "Waiting for approval."
                 )
@@ -577,7 +594,7 @@ class CognitivePipeline:
                         ExecutionEventType
                         .APPROVAL_REQUIRED
                     ),
-                    message=state.final_response,
+                    message=final_response,
                     metadata={
                         "tool": (
                             state.execution.pending_tool
