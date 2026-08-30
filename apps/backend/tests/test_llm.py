@@ -1,8 +1,10 @@
 import asyncio
 import os
+import unittest
 
 import pytest
 
+from src.services.llm_providers import FakeLLMProvider
 from src.services.llm_service import LLMService
 
 
@@ -10,11 +12,53 @@ async def main():
     llm = LLMService()
 
     response = await llm.generate(
-        system_prompt="You are a helpful assistant.",
-        user_prompt="Reply with exactly: GARL works",
+        [
+            {
+                "role": "system",
+                "content": "You are a helpful assistant.",
+            },
+            {
+                "role": "user",
+                "content": "Reply with exactly: GARL works",
+            },
+        ],
+        temperature=0,
+        max_tokens=16,
     )
 
     print(response)
+
+
+class FakeLLMProviderTests(unittest.IsolatedAsyncioTestCase):
+    async def test_fake_llm_returns_reasoning_sections_for_reasoning_prompt(
+        self,
+    ):
+        provider = FakeLLMProvider()
+
+        response = await provider.generate(
+            [
+                {
+                    "role": "system",
+                    "content": "You are GARL's reasoning engine.",
+                }
+            ]
+        )
+
+        self.assertIn("OBJECTIVE:", response)
+        self.assertIn("CONSTRAINTS:", response)
+        self.assertIn("ASSUMPTIONS:", response)
+        self.assertIn("STRATEGY:", response)
+
+    async def test_fake_llm_returns_conversation_text_for_plain_prompt(
+        self,
+    ):
+        provider = FakeLLMProvider()
+
+        response = await provider.generate(
+            [{"role": "user", "content": "hey"}]
+        )
+
+        self.assertEqual(response, "Hey! GARL is running.")
 
 
 @pytest.mark.skipif(
