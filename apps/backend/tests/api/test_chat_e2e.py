@@ -34,7 +34,9 @@ from src.services.reviewer_service import ReviewerService
 from src.services.tool_catalog import ToolCatalog
 from src.services.variable_resolver import VariableResolver
 from src.tools.registry import ToolRegistry
+from src.tools.base_tool import BaseTool
 from src.tools.tool_manager import ToolManager
+from src.models.tool_result import ToolResult
 
 
 class EmptyKnowledgeService:
@@ -42,10 +44,40 @@ class EmptyKnowledgeService:
         return ""
 
 
+class RecordingTerminalTool(BaseTool):
+    def __init__(self):
+        self.calls = []
+
+    @property
+    def name(self) -> str:
+        return "terminal"
+
+    @property
+    def description(self) -> str:
+        return "Records approved terminal actions for API tests."
+
+    @property
+    def input_schema(self) -> dict:
+        return {
+            "type": "object",
+            "properties": {"query": {"type": "string"}},
+            "required": ["query"],
+        }
+
+    async def execute(self, query: str) -> ToolResult:
+        self.calls.append({"query": query})
+        return ToolResult(
+            success=True,
+            tool_name=self.name,
+            output="simulated terminal execution",
+        )
+
+
 def build_fake_conversation_service() -> ConversationService:
     llm = LLMService(provider=FakeLLMProvider())
     tool_manager = ToolManager()
     ToolRegistry.register_all(tool_manager)
+    tool_manager.register(RecordingTerminalTool())
 
     planner = PlannerService(
         llm=llm,
@@ -158,6 +190,11 @@ def test_chat_denied_terminal_action_returns_blocked_failure(
 def test_chat_approval_required_path_can_be_rejected(
     fake_conversation_service,
 ):
+    terminal = (
+        fake_conversation_service.agent.pipeline.executor.tool_manager.get(
+            "terminal"
+        )
+    )
     app.dependency_overrides[get_conversation_service] = (
         lambda: fake_conversation_service
     )
@@ -182,4 +219,41 @@ def test_chat_approval_required_path_can_be_rejected(
     assert state.execution.approval_required is False
     assert [record.decision for record in state.execution.approval_history] == [
         "rejected"
+    ]
+    assert terminal.calls == []
+
+
+def test_approval_resume_uses_existing_pending_state_without_replanning(
+    fake_conversation_service,
+):
+    terminal = (
+        fake_conversation_service.agent.pipeline.executor.tool_manager.get(
+            "terminal"
+        )
+    )
+    app.dependency_overrides[get_conversation_service] = (
+        lambda: fake_conversation_service
+    )
+    try:
+        client = TestClient(app)
+        first = client.post(
+            "/api/v1/chat",
+            json={"conversation_id": "fake-resume", "message": "install package"},
+        )
+        second = client.post(
+            "/api/v1/chat",
+            json={"conversation_id": "fake-resume", "message": "approve"},
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert "approval required" in first.json()["data"]["response"].lower()
+    assert second.status_code == 200
+    assert second.json()["data"]["response"] == "simulated terminal execution"
+    assert terminal.calls == [{"query": "pip install example-package"}]
+    state = fake_conversation_service.agent.get_state("fake-resume")
+    assert state.execution.approval_required is False
+    assert state.execution.attempt == 1
+    assert [record.decision for record in state.execution.approval_history] == [
+        "approved"
     ]
