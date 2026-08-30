@@ -28,7 +28,7 @@ class LLMConfigurationTests(unittest.TestCase):
 
         self.assertEqual(settings.llm_model, "openai/gpt-oss-120b")
 
-    def test_empty_explicit_llm_model_fails_clearly(self):
+    def test_blank_explicit_llm_model_uses_legacy_model_name(self):
         settings = Settings(
             LLM_MODEL="",
             MODEL_NAME="groq/legacy-model",
@@ -36,8 +36,17 @@ class LLMConfigurationTests(unittest.TestCase):
             _env_file=None,
         )
 
-        with self.assertRaisesRegex(ValueError, "LLM model is not configured"):
-            _ = settings.llm_model
+        self.assertEqual(settings.llm_model, "groq/legacy-model")
+
+    def test_whitespace_explicit_llm_model_uses_legacy_model_name(self):
+        settings = Settings(
+            LLM_MODEL="   ",
+            MODEL_NAME="groq/legacy-model",
+            GROQ_API_KEY="secret",
+            _env_file=None,
+        )
+
+        self.assertEqual(settings.llm_model, "groq/legacy-model")
 
     def test_real_groq_provider_keeps_credential_boundary_explicit(self):
         settings = Settings(

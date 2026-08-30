@@ -17,17 +17,19 @@ class Settings(BaseSettings):
 
     @property
     def llm_model(self) -> str:
-        if self.LLM_MODEL is not None:
-            model = self.LLM_MODEL
-        elif self.MODEL_NAME is not None:
-            model = self.MODEL_NAME
-        else:
-            model = self.DEFAULT_LLM_MODEL
+        for configured_model in (
+            self.LLM_MODEL,
+            self.MODEL_NAME,
+            self.DEFAULT_LLM_MODEL,
+        ):
+            if configured_model is None:
+                continue
 
-        model = model.strip()
-        if not model:
-            raise ValueError("LLM model is not configured.")
-        return model
+            model = configured_model.strip()
+            if model:
+                return model
+
+        raise ValueError("LLM model is not configured.")
 
     model_config = SettingsConfigDict(
         env_file=".env",
