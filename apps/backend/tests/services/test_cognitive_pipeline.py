@@ -70,12 +70,18 @@ class FakePlanScorer:
 
 class AlwaysFailingExecutor:
 
+    def __init__(
+        self,
+    ):
+        self.calls = 0
+
     async def execute(
         self,
         messages,
         plan,
         state,
     ):
+        self.calls += 1
         state.record(
             StepResult(
                 step_id=1,
@@ -125,9 +131,10 @@ class CognitivePipelineTests(
     async def test_retry_exhaustion_returns_last_failure_without_crashing(
         self,
     ):
+        executor = AlwaysFailingExecutor()
         pipeline = CognitivePipeline(
             planner=None,
-            executor=AlwaysFailingExecutor(),
+            executor=executor,
             reviewer=FakeReviewer(),
             decision=AlwaysRetryDecision(),
             reasoning=FakeReasoning(),
@@ -165,6 +172,8 @@ class CognitivePipelineTests(
             state.execution.attempt,
             2,
         )
+        self.assertEqual(executor.calls, 2)
+        self.assertEqual(len(state.execution.history), 2)
 
 
 if __name__ == "__main__":
