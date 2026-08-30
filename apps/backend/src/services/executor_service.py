@@ -206,6 +206,11 @@ class ExecutorService:
                 error=permission.reason,
                 tool=step.tool,
                 action=step.action,
+                metadata={
+                    "permission_decision": (
+                        permission.decision.value
+                    ),
+                },
             )
 
         if (

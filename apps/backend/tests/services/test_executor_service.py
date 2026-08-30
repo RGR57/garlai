@@ -1,6 +1,6 @@
 import unittest
 
-from src.models.execution_state import ExecutionState
+from src.models.execution_state import ExecutionState, StepResult
 from src.models.plan import ExecutionPlan, PlanStep
 from src.models.tool_result import ToolResult
 from src.services.context_builder import ContextBuilder
@@ -105,6 +105,28 @@ class ExecutorServiceTests(
         self.assertEqual(len(state.history), 1)
         self.assertFalse(state.history[0].success)
         self.assertEqual(state.history[0].tool, "terminal")
+        self.assertEqual(
+            state.history[0].metadata,
+            {"permission_decision": "deny"},
+        )
+
+    async def test_permission_denial_returns_without_replanning(
+        self,
+    ):
+        state = ExecutionState()
+        state.record(
+            StepResult(
+                step_id=1,
+                success=False,
+                error="Potentially destructive terminal command blocked.",
+                tool="terminal",
+                metadata={"permission_decision": "deny"},
+            )
+        )
+
+        decision = await DecisionService().decide(state)
+
+        self.assertEqual(decision.action, DecisionType.RETURN)
 
     async def test_approval_required_action_is_not_executed_until_approved(
         self,

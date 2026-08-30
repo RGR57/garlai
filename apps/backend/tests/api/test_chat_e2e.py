@@ -130,3 +130,26 @@ def test_chat_calculator_objective_executes_registered_tool(
     assert "4" in response.json()["data"]["response"]
     state = fake_conversation_service.agent.get_state("fake-calc")
     assert [result.tool for result in state.execution.history] == ["calculator"]
+
+
+def test_chat_denied_terminal_action_returns_blocked_failure(
+    fake_conversation_service,
+):
+    app.dependency_overrides[get_conversation_service] = (
+        lambda: fake_conversation_service
+    )
+    try:
+        client = TestClient(app)
+        response = client.post(
+            "/api/v1/chat",
+            json={"conversation_id": "fake-deny", "message": "run rm -rf /"},
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert "blocked" in response.json()["data"]["response"].lower()
+    state = fake_conversation_service.agent.get_state("fake-deny")
+    assert [result.tool for result in state.execution.history] == ["terminal"]
+    assert state.execution.history[0].success is False
+    assert state.execution.attempt == 1

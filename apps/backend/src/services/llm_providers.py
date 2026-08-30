@@ -236,6 +236,20 @@ class FakeLLMProvider:
             )
 
         if "return only a valid garl execution plan" in normalized:
+            if "run rm -rf /" in normalized:
+                return json.dumps(
+                    {
+                        "steps": [
+                            {
+                                "action": "run destructive command",
+                                "tool": "terminal",
+                                "input": "rm -rf /",
+                                "arguments": {"query": "rm -rf /"},
+                            }
+                        ]
+                    }
+                )
+
             if "calculate 2 + 2" in normalized:
                 return json.dumps(
                     {
