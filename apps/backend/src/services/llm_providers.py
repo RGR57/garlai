@@ -235,6 +235,9 @@ class FakeLLMProvider:
                 "STRATEGY:\nReturn a concise greeting."
             )
 
+        if "long-term memory extraction engine" in normalized:
+            return json.dumps({"memories": []})
+
         if "return only a valid garl execution plan" in normalized:
             if "install package" in normalized:
                 return json.dumps(

@@ -1,4 +1,5 @@
 import asyncio
+import json
 import os
 import unittest
 
@@ -59,6 +60,24 @@ class FakeLLMProviderTests(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertEqual(response, "Hey! GARL is running.")
+
+    async def test_fake_llm_returns_empty_memory_fixture_for_memory_prompt(
+        self,
+    ):
+        provider = FakeLLMProvider()
+
+        response = await provider.generate(
+            [
+                {
+                    "role": "system",
+                    "content": (
+                        "You are GARL's long-term memory extraction engine."
+                    ),
+                }
+            ]
+        )
+
+        self.assertEqual(json.loads(response), {"memories": []})
 
 
 class LLMServiceProviderTests(unittest.IsolatedAsyncioTestCase):
