@@ -236,6 +236,22 @@ class FakeLLMProvider:
             )
 
         if "return only a valid garl execution plan" in normalized:
+            if "install package" in normalized:
+                return json.dumps(
+                    {
+                        "steps": [
+                            {
+                                "action": "install package",
+                                "tool": "terminal",
+                                "input": "pip install example-package",
+                                "arguments": {
+                                    "query": "pip install example-package"
+                                },
+                            }
+                        ]
+                    }
+                )
+
             if "run rm -rf /" in normalized:
                 return json.dumps(
                     {

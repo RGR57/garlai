@@ -153,3 +153,33 @@ def test_chat_denied_terminal_action_returns_blocked_failure(
     assert [result.tool for result in state.execution.history] == ["terminal"]
     assert state.execution.history[0].success is False
     assert state.execution.attempt == 1
+
+
+def test_chat_approval_required_path_can_be_rejected(
+    fake_conversation_service,
+):
+    app.dependency_overrides[get_conversation_service] = (
+        lambda: fake_conversation_service
+    )
+    try:
+        client = TestClient(app)
+        first = client.post(
+            "/api/v1/chat",
+            json={"conversation_id": "fake-approval", "message": "install package"},
+        )
+        second = client.post(
+            "/api/v1/chat",
+            json={"conversation_id": "fake-approval", "message": "reject"},
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert first.status_code == 200
+    assert "approval required" in first.json()["data"]["response"].lower()
+    assert second.status_code == 200
+    assert "nothing was executed" in second.json()["data"]["response"].lower()
+    state = fake_conversation_service.agent.get_state("fake-approval")
+    assert state.execution.approval_required is False
+    assert [record.decision for record in state.execution.approval_history] == [
+        "rejected"
+    ]
