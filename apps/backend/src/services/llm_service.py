@@ -5,6 +5,7 @@ from src.services.llm_providers import (
     LiteLLMProvider,
     LLMProvider,
 )
+from src.services.llm_errors import LLMMalformedResponseError
 
 
 class LLMService:
@@ -30,8 +31,19 @@ class LLMService:
         - This service performs exactly one LLM inference.
         """
 
-        return await self.provider.generate(
+        response = await self.provider.generate(
             messages=messages,
             temperature=temperature,
             max_tokens=max_tokens,
         )
+
+        if not isinstance(response, str):
+            raise LLMMalformedResponseError(
+                "The LLM provider returned a malformed response.",
+                code="malformed_response",
+                provider="injected",
+                model=None,
+                retryable=False,
+            )
+
+        return response

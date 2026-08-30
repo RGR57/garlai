@@ -17,3 +17,19 @@ class LLMError(Exception):
 
 class LLMConfigurationError(LLMError):
     pass
+
+
+class LLMProviderUnavailableError(LLMError):
+    pass
+
+
+class LLMModelUnavailableError(LLMError):
+    pass
+
+
+class LLMCredentialsError(LLMError):
+    pass
+
+
+class LLMMalformedResponseError(LLMError):
+    pass
