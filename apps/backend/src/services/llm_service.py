@@ -1,9 +1,18 @@
 from typing import Any
 
 from src.core.config import settings
+from src.services.llm_providers import (
+    LiteLLMProvider,
+    LLMProvider,
+)
 
 
 class LLMService:
+    def __init__(
+        self,
+        provider: LLMProvider | None = None,
+    ):
+        self.provider = provider or LiteLLMProvider(settings)
 
     async def generate(
         self,
@@ -21,19 +30,8 @@ class LLMService:
         - This service performs exactly one LLM inference.
         """
 
-        from litellm import acompletion
-
-        response = await acompletion(
-            model=settings.MODEL_NAME,
-            api_key=settings.GROQ_API_KEY,
+        return await self.provider.generate(
             messages=messages,
             temperature=temperature,
             max_tokens=max_tokens,
         )
-
-        content = response.choices[0].message.content
-
-        if content is None:
-            return ""
-
-        return content.strip()

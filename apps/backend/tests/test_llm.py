@@ -61,6 +61,21 @@ class FakeLLMProviderTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response, "Hey! GARL is running.")
 
 
+class LLMServiceProviderTests(unittest.IsolatedAsyncioTestCase):
+    async def test_llm_service_uses_injected_provider_without_network(
+        self,
+    ):
+        service = LLMService(provider=FakeLLMProvider())
+
+        response = await service.generate(
+            [{"role": "user", "content": "hey"}],
+            temperature=0,
+            max_tokens=16,
+        )
+
+        self.assertEqual(response, "Hey! GARL is running.")
+
+
 @pytest.mark.skipif(
     os.environ.get("GARL_RUN_LIVE_LLM_TESTS") != "1",
     reason=(

@@ -30,6 +30,8 @@ from src.tools.tool_manager import ToolManager
 from src.services.agent_service import AgentService
 from src.services.context_builder import ContextBuilder
 from src.services.conversation_service import ConversationService
+from src.core.config import settings
+from src.services.llm_providers import FakeLLMProvider
 from src.services.llm_service import LLMService
 from src.services.memory_service import MemoryService
 from src.services.planner_service import PlannerService
@@ -130,6 +132,11 @@ def get_memory_extractor() -> MemoryExtractor:
 
 @lru_cache
 def get_llm_service() -> LLMService:
+    if settings.LLM_FAKE_MODE:
+        return LLMService(
+            provider=FakeLLMProvider(),
+        )
+
     return LLMService()
 
 
