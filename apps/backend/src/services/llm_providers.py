@@ -1,4 +1,5 @@
 from collections.abc import Awaitable, Callable
+import json
 from typing import Any, Protocol
 
 from src.core.config import Settings
@@ -224,13 +225,28 @@ class FakeLLMProvider:
             str(message.get("content", ""))
             for message in messages
         )
+        normalized = joined.lower()
 
-        if "reasoning engine" in joined:
+        if "reasoning engine" in normalized:
             return (
                 "OBJECTIVE:\nRespond conversationally.\n\n"
                 "CONSTRAINTS:\n- Do not use tools unnecessarily.\n\n"
                 "ASSUMPTIONS:\n- The user is greeting GARL.\n\n"
                 "STRATEGY:\nReturn a concise greeting."
+            )
+
+        if "return only a valid garl execution plan" in normalized:
+            return json.dumps(
+                {
+                    "steps": [
+                        {
+                            "action": "respond conversationally",
+                            "tool": None,
+                            "input": "Reply to the user with a concise greeting.",
+                            "arguments": {},
+                        }
+                    ]
+                }
             )
 
         return "Hey! GARL is running."
