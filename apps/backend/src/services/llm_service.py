@@ -1,7 +1,5 @@
 from typing import Any
 
-from litellm import acompletion
-
 from src.core.config import settings
 
 
@@ -22,6 +20,8 @@ class LLMService:
         - Planning/review loops are handled by CognitivePipeline.
         - This service performs exactly one LLM inference.
         """
+
+        from litellm import acompletion
 
         response = await acompletion(
             model=settings.MODEL_NAME,

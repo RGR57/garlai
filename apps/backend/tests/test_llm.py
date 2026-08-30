@@ -1,4 +1,7 @@
 import asyncio
+import os
+
+import pytest
 
 from src.services.llm_service import LLMService
 
@@ -14,4 +17,12 @@ async def main():
     print(response)
 
 
-asyncio.run(main())
+@pytest.mark.skipif(
+    os.environ.get("GARL_RUN_LIVE_LLM_TESTS") != "1",
+    reason=(
+        "Live LLM test is opt-in to avoid network and paid-provider "
+        "calls during deterministic backend validation."
+    ),
+)
+def test_live_llm_generate():
+    asyncio.run(main())
