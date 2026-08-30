@@ -1,0 +1,64 @@
+# ==============================
+# GARL - Git Ignore
+# ==============================
+
+# Secrets / environment
+.env
+.env.*
+!.env.example
+
+# Python
+.venv/
+venv/
+env/
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Node / frontend
+node_modules/
+.next/
+dist/
+build/
+coverage/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Runtime / local databases
+*.db
+*.sqlite
+*.sqlite3
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# Credentials / keys
+*.pem
+*.key
+credentials.json
+secrets.json
+
+# Downloaded Python packages
+*.whl
+
+# Python packaging artifacts
+*.egg-info/
+.eggs/
+pip-wheel-metadata/

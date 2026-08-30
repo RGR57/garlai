@@ -1,0 +1,261 @@
+Folder PATH listing for volume Windows
+Volume serial number is 0000023E E26E:0A81
+C:\USERS\ROHAN\DESKTOP\GARL\ROOT\APPS\BACKEND\SRC
+|   main.py
+|   permission_test.py
+|   __init__.py
+|
++---agents
+|   +---executor
+|   |       executor.py
+|   |       prompts.py
+|   |       schemas.py
+|   |       service.py
+|   |       __init__.py
+|   |
+|   +---memory
+|   |       memory.py
+|   |       prompts.py
+|   |       schemas.py
+|   |       service.py
+|   |       __init__.py
+|   |
+|   +---planner
+|   |   |   planner.py
+|   |   |   prompts.py
+|   |   |   schemas.py
+|   |   |   service.py
+|   |   |   __init__.py
+|   |   |
+|   |   \---__pycache__
+|   |           planner.cpython-311.pyc
+|   |           schemas.cpython-311.pyc
+|   |           service.cpython-311.pyc
+|   |           __init__.cpython-311.pyc
+|   |
+|   +---reviewer
+|   |       prompts.py
+|   |       reviewer.py
+|   |       schemas.py
+|   |       service.py
+|   |       __init__.py
+|   |
+|   \---shared
+|           base_agent.py
+|           exceptions.py
+|           llm.py
+|           types.py
+|           __init__.py
+|
++---api
+|   |   router.py
+|   |   system.py
+|   |   __init__.py
+|   |
+|   +---routes
+|   |   |   executor.py
+|   |   |   health.py
+|   |   |   memory.py
+|   |   |   planner.py
+|   |   |   reviewer.py
+|   |   |
+|   |   \---__pycache__
+|   |           planner.cpython-311.pyc
+|   |
+|   +---v1
+|   |   |   chat.py
+|   |   |   cognitive.py
+|   |   |   __init__.py
+|   |   |
+|   |   \---__pycache__
+|   |           chat.cpython-311.pyc
+|   |           cognitive.cpython-311.pyc
+|   |           __init__.cpython-311.pyc
+|   |
+|   \---__pycache__
+|           chat.cpython-311.pyc
+|           router.cpython-311.pyc
+|           __init__.cpython-311.pyc
+|
++---core
+|   |   config.py
+|   |   constants.py
+|   |   dependencies.py
+|   |   exceptions.py
+|   |   lifespan.py
+|   |   logger.py
+|   |   logging.py
+|   |   prompts.py
+|   |   security.py
+|   |   __init__.py
+|   |
+|   \---__pycache__
+|           config.cpython-311.pyc
+|           dependencies.cpython-311.pyc
+|           exceptions.cpython-311.pyc
+|           logging.cpython-311.pyc
+|           prompts.cpython-311.pyc
+|           __init__.cpython-311.pyc
+|
++---events
+|       event.py
+|       event_bus.py
+|       listeners.py
+|
++---models
+|   |   artifact.py
+|   |   chat_response.py
+|   |   cognitive_state.py
+|   |   conversation.py
+|   |   decision.py
+|   |   execution_state.py
+|   |   execution_trace.py
+|   |   memory.py
+|   |   plan.py
+|   |   reasoning.py
+|   |   tool_result.py
+|   |   tool_risk.py
+|   |
+|   \---__pycache__
+|           artifact.cpython-311.pyc
+|           chat_response.cpython-311.pyc
+|           cognitive_state.cpython-311.pyc
+|           conversation.cpython-311.pyc
+|           decision.cpython-311.pyc
+|           execution_state.cpython-311.pyc
+|           execution_trace.cpython-311.pyc
+|           memory.cpython-311.pyc
+|           plan.cpython-311.pyc
+|           reasoning.cpython-311.pyc
+|           tool_result.cpython-311.pyc
+|           tool_risk.cpython-311.pyc
+|
++---prompts
+|   |   planner_prompt.py
+|   |
+|   \---__pycache__
+|           planner_prompt.cpython-311.pyc
+|
++---repositories
+|   |   cognitive_state_repository.py
+|   |   conversation_repository.py
+|   |   in_memory_conversation_repository.py
+|   |   in_memory_memory_repository.py
+|   |   memory_repository.py
+|   |   __init__.py
+|   |
+|   \---__pycache__
+|           cognitive_state_repository.cpython-311.pyc
+|           conversation_repository.cpython-311.pyc
+|           in_memory_conversation_repository.cpython-311.pyc
+|           in_memory_memory_repository.cpython-311.pyc
+|           memory_repository.cpython-311.pyc
+|           __init__.cpython-311.pyc
+|
++---schemas
+|   |   chat.py
+|   |   response.py
+|   |
+|   \---__pycache__
+|           chat.cpython-311.pyc
+|           response.cpython-311.pyc
+|
++---services
+|   |   agent_service.py
+|   |   approval_service.py
+|   |   artifact_detector.py
+|   |   artifact_service.py
+|   |   cognitive_inspector.py
+|   |   cognitive_pipeline.py
+|   |   context_builder.py
+|   |   conversation_service.py
+|   |   decision_service.py
+|   |   executor_service.py
+|   |   llm_service.py
+|   |   memory_extractor.py
+|   |   memory_service.py
+|   |   permission_service.py
+|   |   planner_service.py
+|   |   plan_parser.py
+|   |   prompt_builder.py
+|   |   reasoning_service.py
+|   |   response_composer.py
+|   |   reviewer_service.py
+|   |   tool_catalog.py
+|   |   tool_registry.py
+|   |   tool_router.py
+|   |   variable_resolver.py
+|   |   __init__.py
+|   |
+|   \---__pycache__
+|           agent_service.cpython-311.pyc
+|           approval_service.cpython-311.pyc
+|           artifact_detector.cpython-311.pyc
+|           artifact_service.cpython-311.pyc
+|           cognitive_inspector.cpython-311.pyc
+|           cognitive_pipeline.cpython-311.pyc
+|           context_builder.cpython-311.pyc
+|           conversation_service.cpython-311.pyc
+|           decision_service.cpython-311.pyc
+|           executor_service.cpython-311.pyc
+|           llm_service.cpython-311.pyc
+|           memory_extractor.cpython-311.pyc
+|           memory_service.cpython-311.pyc
+|           permission_service.cpython-311.pyc
+|           planner_service.cpython-311.pyc
+|           plan_parser.cpython-311.pyc
+|           prompt_builder.cpython-311.pyc
+|           reasoning_service.cpython-311.pyc
+|           response_composer.cpython-311.pyc
+|           reviewer_service.cpython-311.pyc
+|           tool_catalog.cpython-311.pyc
+|           tool_registry.cpython-311.pyc
+|           tool_router.cpython-311.pyc
+|           variable_resolver.cpython-311.pyc
+|           __init__.cpython-311.pyc
+|
++---tools
+|   |   base_tool.py
+|   |   calculator_tool.py
+|   |   registry.py
+|   |   retry_test_tool.py
+|   |   tool_manager.py
+|   |
+|   +---browser
+|   +---docker
+|   +---filesystem
+|   |   |   filesystem_tool.py
+|   |   |
+|   |   \---__pycache__
+|   |           filesystem_tool.cpython-311.pyc
+|   |
+|   +---github
+|   |   |   git_tool.py
+|   |   |
+|   |   \---__pycache__
+|   |           git_tool.cpython-311.pyc
+|   |
+|   +---terminal
+|   |   |   terminal_tool.py
+|   |   |   __init__.py
+|   |   |
+|   |   \---__pycache__
+|   |           terminal_tool.cpython-311.pyc
+|   |           __init__.cpython-311.pyc
+|   |
+|   \---__pycache__
+|           base_tool.cpython-311.pyc
+|           calculator_tool.cpython-311.pyc
+|           registry.cpython-311.pyc
+|           retry_test_tool.cpython-311.pyc
+|           tool_manager.cpython-311.pyc
+|
++---utils
+|   |   logger.py
+|   |
+|   \---__pycache__
+|           logger.cpython-311.pyc
+|
+\---__pycache__
+        main.cpython-311.pyc
+        __init__.cpython-311.pyc
