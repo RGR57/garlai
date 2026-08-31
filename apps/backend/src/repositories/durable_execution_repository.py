@@ -2,7 +2,12 @@ from __future__ import annotations
 
 from typing import Protocol
 
-from src.models.durable_execution import DurableStep, ExecutionRun
+from src.models.durable_execution import (
+    DurableStep,
+    DurableStepStatus,
+    ExecutionRun,
+    OperationClaim,
+)
 
 
 class DurableExecutionRepository(Protocol):
@@ -29,3 +34,32 @@ class DurableExecutionRepository(Protocol):
 
     async def delete_for_test(self, execution_id: str) -> None:
         """Remove one execution only for deterministic test cleanup."""
+
+    async def claim_operation(
+        self,
+        execution_id: str,
+        step_id: int,
+        operation_id: str,
+        payload_hash: str,
+    ) -> OperationClaim:
+        """Atomically claim a consequential operation before invocation."""
+
+    async def record_operation_outcome(
+        self,
+        claim: OperationClaim,
+        status: DurableStepStatus,
+        *,
+        result: dict | None = None,
+        error: dict | None = None,
+        artifact: dict | None = None,
+    ) -> None:
+        """Persist one proven terminal outcome for an already claimed operation."""
+
+    async def mark_operation_uncertain(
+        self,
+        execution_id: str,
+        step_id: int,
+        operation_id: str,
+        reason: str,
+    ) -> None:
+        """Stop recovery when a claimed consequential invocation is ambiguous."""

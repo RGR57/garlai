@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import sqlite3
+import uuid
 from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
@@ -14,6 +15,8 @@ from src.models.durable_execution import (
     DurableStepStatus,
     ExecutionRun,
     ExecutionRunStatus,
+    OperationClaim,
+    OperationEventType,
 )
 from src.repositories.durable_execution_repository import DurableExecutionRepository
 
@@ -72,6 +75,63 @@ class SQLiteDurableExecutionRepository(DurableExecutionRepository):
 
     async def insert_invalid_json_for_test(self, execution_id: str) -> None:
         await self._run(lambda: self._insert_invalid_json_for_test(execution_id))
+
+    async def claim_operation(
+        self,
+        execution_id: str,
+        step_id: int,
+        operation_id: str,
+        payload_hash: str,
+    ) -> OperationClaim:
+        return await self._run(
+            lambda: self._claim_operation(
+                execution_id,
+                step_id,
+                operation_id,
+                payload_hash,
+            )
+        )
+
+    async def operation_events(
+        self,
+        operation_id: str,
+    ) -> list[OperationEventType]:
+        return await self._run(lambda: self._operation_events(operation_id))
+
+    async def record_operation_outcome(
+        self,
+        claim: OperationClaim,
+        status: DurableStepStatus,
+        *,
+        result: dict | None = None,
+        error: dict | None = None,
+        artifact: dict | None = None,
+    ) -> None:
+        await self._run(
+            lambda: self._record_operation_outcome(
+                claim,
+                status,
+                result=result,
+                error=error,
+                artifact=artifact,
+            )
+        )
+
+    async def mark_operation_uncertain(
+        self,
+        execution_id: str,
+        step_id: int,
+        operation_id: str,
+        reason: str,
+    ) -> None:
+        await self._run(
+            lambda: self._mark_operation_uncertain(
+                execution_id,
+                step_id,
+                operation_id,
+                reason,
+            )
+        )
 
     async def _run(self, operation: Callable[[], T]) -> T:
         return await asyncio.to_thread(operation)
@@ -329,6 +389,297 @@ class SQLiteDurableExecutionRepository(DurableExecutionRepository):
         finally:
             connection.close()
 
+    def _claim_operation(
+        self,
+        execution_id: str,
+        step_id: int,
+        operation_id: str,
+        payload_hash: str,
+    ) -> OperationClaim:
+        attempt_id = str(uuid.uuid4())
+        connection = self._connect()
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            updated = connection.execute(
+                """
+                UPDATE execution_steps
+                SET status = ?, attempt_count = attempt_count + 1, updated_at = ?
+                WHERE execution_id = ? AND step_id = ? AND status = ?
+                  AND operation_id = ? AND payload_hash = ?
+                """,
+                (
+                    DurableStepStatus.EXECUTING.value,
+                    _now(),
+                    execution_id,
+                    step_id,
+                    DurableStepStatus.PENDING.value,
+                    operation_id,
+                    payload_hash,
+                ),
+            ).rowcount
+            if updated != 1:
+                connection.rollback()
+                return OperationClaim.denied(execution_id, step_id, operation_id)
+            connection.execute(
+                """
+                INSERT INTO operation_journal (
+                    operation_event_id, execution_id, step_id, operation_id,
+                    event_type, attempt_id, payload_hash, fact_json, occurred_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    str(uuid.uuid4()),
+                    execution_id,
+                    step_id,
+                    operation_id,
+                    OperationEventType.INTENT_RECORDED.value,
+                    attempt_id,
+                    payload_hash,
+                    _encode_json({}),
+                    _now(),
+                ),
+            )
+            connection.commit()
+            return OperationClaim(
+                True,
+                execution_id,
+                step_id,
+                operation_id,
+                attempt_id,
+            )
+        except Exception:
+            connection.rollback()
+            raise
+        finally:
+            connection.close()
+
+    def _operation_events(self, operation_id: str) -> list[OperationEventType]:
+        connection = self._connect()
+        try:
+            return [
+                OperationEventType(row["event_type"])
+                for row in connection.execute(
+                    """
+                    SELECT event_type FROM operation_journal
+                    WHERE operation_id = ? ORDER BY occurred_at
+                    """,
+                    (operation_id,),
+                )
+            ]
+        finally:
+            connection.close()
+
+    def _record_operation_outcome(
+        self,
+        claim: OperationClaim,
+        status: DurableStepStatus,
+        *,
+        result: dict | None,
+        error: dict | None,
+        artifact: dict | None,
+    ) -> None:
+        if not claim.granted:
+            raise ValueError("Only a granted operation claim may record an outcome.")
+        if status not in {
+            DurableStepStatus.COMPLETED,
+            DurableStepStatus.KNOWN_FAILED,
+        }:
+            raise ValueError("Operation outcomes must be confirmed terminal facts.")
+
+        event_type = OperationEventType(status.value)
+        fact = {"result": result, "error": error, "artifact": artifact}
+        encoded_fact = _encode_json(fact)
+        connection = self._connect()
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute(
+                """
+                SELECT status, operation_id, payload_hash, result_json, error_json,
+                       artifact_json
+                FROM execution_steps
+                WHERE execution_id = ? AND step_id = ?
+                """,
+                (claim.execution_id, claim.step_id),
+            ).fetchone()
+            if row is None or row["operation_id"] != claim.operation_id:
+                raise ValueError("Operation claim does not match a durable step.")
+            if row["status"] == status.value:
+                existing = connection.execute(
+                    """
+                    SELECT fact_json FROM operation_journal
+                    WHERE operation_id = ? AND event_type = ?
+                    """,
+                    (claim.operation_id, event_type.value),
+                ).fetchone()
+                aggregate_matches = (
+                    row["result_json"] == _encode_optional_mapping(result, "operation result")
+                    and row["error_json"] == _encode_optional_mapping(error, "operation error")
+                    and row["artifact_json"] == _encode_optional_mapping(artifact, "operation artifact")
+                )
+                if (
+                    existing is not None
+                    and existing["fact_json"] == encoded_fact
+                    and aggregate_matches
+                ):
+                    connection.commit()
+                    return
+                raise ValueError("Conflicting terminal operation outcome.")
+            if row["status"] != DurableStepStatus.EXECUTING.value:
+                raise ValueError("Operation is not awaiting a terminal outcome.")
+            has_intent = connection.execute(
+                """
+                SELECT 1 FROM operation_journal
+                WHERE operation_id = ? AND event_type = ? AND attempt_id = ?
+                """,
+                (
+                    claim.operation_id,
+                    OperationEventType.INTENT_RECORDED.value,
+                    claim.attempt_id,
+                ),
+            ).fetchone()
+            if has_intent is None:
+                raise ValueError("Operation outcome has no matching committed intent.")
+            connection.execute(
+                """
+                UPDATE execution_steps
+                SET status = ?, result_json = ?, error_json = ?, artifact_json = ?,
+                    updated_at = ?
+                WHERE execution_id = ? AND step_id = ? AND status = ?
+                """,
+                (
+                    status.value,
+                    _encode_optional_mapping(result, "operation result"),
+                    _encode_optional_mapping(error, "operation error"),
+                    _encode_optional_mapping(artifact, "operation artifact"),
+                    _now(),
+                    claim.execution_id,
+                    claim.step_id,
+                    DurableStepStatus.EXECUTING.value,
+                ),
+            )
+            connection.execute(
+                """
+                INSERT INTO operation_journal (
+                    operation_event_id, execution_id, step_id, operation_id,
+                    event_type, attempt_id, payload_hash, fact_json, occurred_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    str(uuid.uuid4()),
+                    claim.execution_id,
+                    claim.step_id,
+                    claim.operation_id,
+                    event_type.value,
+                    claim.attempt_id,
+                    row["payload_hash"],
+                    encoded_fact,
+                    _now(),
+                ),
+            )
+            connection.commit()
+        except Exception:
+            connection.rollback()
+            raise
+        finally:
+            connection.close()
+
+    def _mark_operation_uncertain(
+        self,
+        execution_id: str,
+        step_id: int,
+        operation_id: str,
+        reason: str,
+    ) -> None:
+        encoded_fact = _encode_json({"reason": reason})
+        connection = self._connect()
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute(
+                """
+                SELECT status, payload_hash FROM execution_steps
+                WHERE execution_id = ? AND step_id = ? AND operation_id = ?
+                """,
+                (execution_id, step_id, operation_id),
+            ).fetchone()
+            if row is None:
+                raise ValueError("Unknown durable operation.")
+            if row["status"] == DurableStepStatus.UNCERTAIN.value:
+                existing = connection.execute(
+                    """
+                    SELECT fact_json FROM operation_journal
+                    WHERE operation_id = ? AND event_type = ?
+                    """,
+                    (operation_id, OperationEventType.UNCERTAIN.value),
+                ).fetchone()
+                if existing is not None and existing["fact_json"] == encoded_fact:
+                    connection.commit()
+                    return
+                raise ValueError("Conflicting uncertainty fact.")
+            if row["status"] != DurableStepStatus.EXECUTING.value:
+                raise ValueError("Only an executing operation may become uncertain.")
+            intent = connection.execute(
+                """
+                SELECT attempt_id FROM operation_journal
+                WHERE operation_id = ? AND event_type = ?
+                """,
+                (operation_id, OperationEventType.INTENT_RECORDED.value),
+            ).fetchone()
+            if intent is None:
+                raise ValueError("Uncertainty requires a committed operation intent.")
+            connection.execute(
+                """
+                UPDATE execution_steps SET status = ?, error_json = ?, updated_at = ?
+                WHERE execution_id = ? AND step_id = ? AND status = ?
+                """,
+                (
+                    DurableStepStatus.UNCERTAIN.value,
+                    _encode_json({"reason": reason}),
+                    _now(),
+                    execution_id,
+                    step_id,
+                    DurableStepStatus.EXECUTING.value,
+                ),
+            )
+            run_updated = connection.execute(
+                """
+                UPDATE execution_runs SET status = ?, updated_at = ?
+                WHERE execution_id = ? AND status = ?
+                """,
+                (
+                    ExecutionRunStatus.RECOVERY_REQUIRED.value,
+                    _now(),
+                    execution_id,
+                    ExecutionRunStatus.RUNNING.value,
+                ),
+            ).rowcount
+            if run_updated != 1:
+                raise ValueError("Uncertainty requires a running durable execution.")
+            connection.execute(
+                """
+                INSERT INTO operation_journal (
+                    operation_event_id, execution_id, step_id, operation_id,
+                    event_type, attempt_id, payload_hash, fact_json, occurred_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    str(uuid.uuid4()),
+                    execution_id,
+                    step_id,
+                    operation_id,
+                    OperationEventType.UNCERTAIN.value,
+                    intent["attempt_id"],
+                    row["payload_hash"],
+                    encoded_fact,
+                    _now(),
+                ),
+            )
+            connection.commit()
+        except Exception:
+            connection.rollback()
+            raise
+        finally:
+            connection.close()
+
 
 _MIGRATION_1_STATEMENTS = (
     """
@@ -430,6 +781,17 @@ def _encode_json(value: object) -> str:
 
 def _encode_optional_json(value: object | None) -> str | None:
     return None if value is None else _encode_json(value)
+
+
+def _encode_optional_mapping(
+    value: dict | None,
+    field_name: str,
+) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        raise ValueError(f"{field_name} must be a JSON object")
+    return _encode_json(value)
 
 
 def _decode_mapping(raw: str | None, field_name: str) -> dict:
