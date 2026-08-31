@@ -30,35 +30,18 @@ async def chat(
     ),
 ):
 
-    print(
-        ">>> GARL CHAT ROUTE ENTERED <<<",
-        flush=True,
-    )
-
-    print(
-        f">>> conversation_id={request.conversation_id}",
-        flush=True,
-    )
-
-    print(
-        f">>> message={request.message}",
-        flush=True,
-    )
-
     response = await conversation_service.chat(
         request
-    )
-
-    print(
-        f">>> GARL CHAT RESPONSE={response}",
-        flush=True,
     )
 
     return APIResponse(
         success=True,
         message="Chat completed successfully.",
         data=ChatResponse(
-        response=response.response,
-        artifacts=response.artifacts,
-    ),
+            response=response.response,
+            artifacts=response.artifacts,
+            execution_id=response.execution_id,
+            execution_status=response.execution_status,
+            pending_approval_id=response.pending_approval_id,
+        ),
     )

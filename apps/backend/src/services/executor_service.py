@@ -1,4 +1,5 @@
 from pathlib import Path
+import uuid
 
 from src.core.prompts import SystemPrompts
 
@@ -15,7 +16,7 @@ from src.models.execution_state import (
     ExecutionState,
     StepResult,
 )
-from src.models.durable_execution import DurableStepStatus
+from src.models.durable_execution import ApprovalRequest, DurableStepStatus
 
 from src.models.plan import (
     ExecutionPlan,
@@ -150,12 +151,33 @@ class ExecutorService:
             permission.decision is PermissionDecision.REQUIRE_APPROVAL
             and approved_payload_hash != step.payload_hash
         ):
+            if step.operation_id is None or step.payload_hash is None:
+                return StepResult(
+                    step_id=step_id,
+                    success=False,
+                    error="Approval-required durable step lacks an operation identity.",
+                    tool=step.tool,
+                    action=step.action,
+                )
+            approval = ApprovalRequest.create(
+                approval_id=str(uuid.uuid4()),
+                execution_id=execution_id,
+                step_id=step_id,
+                operation_id=step.operation_id,
+                tool=step.tool,
+                action=step.action,
+                arguments=arguments,
+                reason=permission.reason,
+                risk_level=permission.risk.value,
+            )
+            await self.durable_repository.request_approval(approval)
             return StepResult(
                 step_id=step_id,
                 success=False,
                 error=f"Approval required: {permission.reason}",
                 tool=step.tool,
                 action=step.action,
+                metadata={"pending_approval_id": approval.approval_id},
             )
         if not permission.execution_policy.is_consequential:
             claimed = await self.durable_repository.claim_read_only_step(

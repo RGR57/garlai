@@ -83,6 +83,25 @@ class CognitivePipeline:
             plan_scorer
         )
 
+    async def create_validated_plan(
+        self,
+        messages: list[ConversationMessage],
+        state: CognitiveState,
+    ):
+        candidates = await self.candidate_plan_generator.generate(
+            messages,
+            state,
+            candidates=1,
+        )
+        valid = [
+            candidate
+            for candidate in candidates
+            if self.plan_validator.validate(candidate, state).valid
+        ]
+        if not valid:
+            raise RuntimeError("No generated plan passed GARL validation.")
+        return max(valid, key=lambda candidate: self.plan_scorer.score(candidate, state).score)
+
     async def run_persisted_step(
         self,
         *,

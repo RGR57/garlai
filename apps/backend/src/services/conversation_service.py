@@ -1,4 +1,5 @@
 from src.models.conversation import ConversationMessage
+from src.models.chat_response import ChatResponse
 
 from src.repositories.conversation_repository import (
     ConversationRepository,
@@ -24,7 +25,7 @@ class ConversationService:
     async def chat(
         self,
         request: ChatRequest,
-    ) -> str:
+    ) -> ChatResponse:
 
         logger.info(
             "Incoming chat request"
@@ -74,9 +75,11 @@ class ConversationService:
         # ======================================================
 
         agent_response = await self.agent.respond(
-        conversation_id=request.conversation_id,
-        messages=messages,
-    )
+            conversation_id=request.conversation_id,
+            messages=messages,
+            execution_id=request.execution_id,
+            approval_id=request.approval_id,
+        )
 
         # ======================================================
         # STORE ASSISTANT RESPONSE

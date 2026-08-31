@@ -13,6 +13,7 @@ from src.core.exceptions import (
 from src.core.logging import (
     setup_logging,
 )
+from src.core.lifespan import lifespan
 
 
 # ==========================================================
@@ -29,6 +30,7 @@ setup_logging()
 app = FastAPI(
     title="GARL Backend",
     version="1.0.0",
+    lifespan=lifespan,
 )
 
 

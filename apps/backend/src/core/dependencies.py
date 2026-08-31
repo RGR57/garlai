@@ -1,4 +1,5 @@
 from functools import lru_cache
+from pathlib import Path
 from src.services.reasoning_service import (
     ReasoningService,
 )
@@ -17,6 +18,12 @@ from src.repositories.in_memory_conversation_repository import (
 from src.repositories.in_memory_memory_repository import (
     InMemoryMemoryRepository,
 )
+from src.repositories.durable_execution_repository import (
+    DurableExecutionRepository,
+)
+from src.repositories.sqlite_durable_execution_repository import (
+    SQLiteDurableExecutionRepository,
+)
 from src.services.knowledge_service import (
     KnowledgeService,
 )
@@ -28,6 +35,7 @@ from src.tools.registry import ToolRegistry
 from src.tools.tool_manager import ToolManager
 
 from src.services.agent_service import AgentService
+from src.services.durable_execution_service import DurableExecutionService
 from src.services.context_builder import ContextBuilder
 from src.services.conversation_service import ConversationService
 from src.core.config import settings
@@ -120,6 +128,11 @@ def get_conversation_repository() -> ConversationRepository:
 @lru_cache
 def get_memory_repository() -> InMemoryMemoryRepository:
     return InMemoryMemoryRepository()
+
+
+@lru_cache
+def get_durable_execution_repository() -> DurableExecutionRepository:
+    return SQLiteDurableExecutionRepository(Path(settings.DURABLE_DB_PATH))
 
 @lru_cache
 def get_memory_extractor() -> MemoryExtractor:
@@ -272,6 +285,7 @@ def get_executor_service() -> ExecutorService:
         tool_manager=get_tool_manager(),
         variable_resolver=get_variable_resolver(),
         permission_service=get_permission_service(),
+        durable_repository=get_durable_execution_repository(),
     )
 
 @lru_cache
@@ -333,6 +347,7 @@ def get_agent_service() -> AgentService:
         memory_service=get_memory_service(),
         knowledge_service=get_knowledge_service(),
         memory_extractor=get_memory_extractor(),
+        durable_execution_service=get_durable_execution_service(),
     )
 
 # ==========================================================
@@ -358,7 +373,14 @@ from src.services.approval_service import ApprovalService
 def get_approval_service() -> ApprovalService:
     return ApprovalService(
         tool_manager=get_tool_manager(),
+        durable_repository=get_durable_execution_repository(),
+        executor=get_executor_service(),
     )
+
+
+@lru_cache
+def get_durable_execution_service() -> DurableExecutionService:
+    return DurableExecutionService(get_durable_execution_repository())
 
 
 
