@@ -63,3 +63,17 @@ class DurableExecutionRepository(Protocol):
         reason: str,
     ) -> None:
         """Stop recovery when a claimed consequential invocation is ambiguous."""
+
+    async def claim_read_only_step(self, execution_id: str, step_id: int) -> bool:
+        """Conditionally begin a retry-safe read-only step."""
+
+    async def record_read_only_outcome(
+        self,
+        execution_id: str,
+        step_id: int,
+        status: DurableStepStatus,
+        *,
+        result: dict | None = None,
+        error: dict | None = None,
+    ) -> None:
+        """Persist the confirmed outcome of a claimed read-only step."""

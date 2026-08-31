@@ -133,6 +133,30 @@ class SQLiteDurableExecutionRepository(DurableExecutionRepository):
             )
         )
 
+    async def claim_read_only_step(self, execution_id: str, step_id: int) -> bool:
+        return await self._run(
+            lambda: self._claim_read_only_step(execution_id, step_id)
+        )
+
+    async def record_read_only_outcome(
+        self,
+        execution_id: str,
+        step_id: int,
+        status: DurableStepStatus,
+        *,
+        result: dict | None = None,
+        error: dict | None = None,
+    ) -> None:
+        await self._run(
+            lambda: self._record_read_only_outcome(
+                execution_id,
+                step_id,
+                status,
+                result=result,
+                error=error,
+            )
+        )
+
     async def _run(self, operation: Callable[[], T]) -> T:
         return await asyncio.to_thread(operation)
 
@@ -677,6 +701,71 @@ class SQLiteDurableExecutionRepository(DurableExecutionRepository):
         except Exception:
             connection.rollback()
             raise
+        finally:
+            connection.close()
+
+    def _claim_read_only_step(self, execution_id: str, step_id: int) -> bool:
+        connection = self._connect()
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            updated = connection.execute(
+                """
+                UPDATE execution_steps
+                SET status = ?, attempt_count = attempt_count + 1, updated_at = ?
+                WHERE execution_id = ? AND step_id = ? AND status = ?
+                  AND operation_id IS NULL
+                """,
+                (
+                    DurableStepStatus.EXECUTING.value,
+                    _now(),
+                    execution_id,
+                    step_id,
+                    DurableStepStatus.PENDING.value,
+                ),
+            ).rowcount
+            connection.commit()
+            return updated == 1
+        except Exception:
+            connection.rollback()
+            raise
+        finally:
+            connection.close()
+
+    def _record_read_only_outcome(
+        self,
+        execution_id: str,
+        step_id: int,
+        status: DurableStepStatus,
+        *,
+        result: dict | None,
+        error: dict | None,
+    ) -> None:
+        if status not in {
+            DurableStepStatus.COMPLETED,
+            DurableStepStatus.KNOWN_FAILED,
+        }:
+            raise ValueError("Read-only steps require a confirmed outcome.")
+        connection = self._connect()
+        try:
+            updated = connection.execute(
+                """
+                UPDATE execution_steps
+                SET status = ?, result_json = ?, error_json = ?, updated_at = ?
+                WHERE execution_id = ? AND step_id = ? AND status = ?
+                  AND operation_id IS NULL
+                """,
+                (
+                    status.value,
+                    _encode_optional_mapping(result, "read-only result"),
+                    _encode_optional_mapping(error, "read-only error"),
+                    _now(),
+                    execution_id,
+                    step_id,
+                    DurableStepStatus.EXECUTING.value,
+                ),
+            ).rowcount
+            if updated != 1:
+                raise ValueError("Read-only step is not awaiting an outcome.")
         finally:
             connection.close()
 
