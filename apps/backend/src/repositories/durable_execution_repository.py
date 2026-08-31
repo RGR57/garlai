@@ -85,6 +85,9 @@ class DurableExecutionRepository(Protocol):
     ) -> None:
         """Persist the confirmed outcome of a claimed read-only step."""
 
+    async def complete_if_finished(self, execution_id: str) -> bool:
+        """Mark a running execution complete only after every step succeeds."""
+
     async def request_approval(self, approval: ApprovalRequest) -> None:
         """Persist an immutable approval request for one exact operation."""
 

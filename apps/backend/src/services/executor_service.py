@@ -233,6 +233,8 @@ class ExecutorService:
                 ),
                 error=error_value,
             )
+            if tool_result.success:
+                await self.durable_repository.complete_if_finished(execution_id)
             return StepResult(
                 step_id=step_id,
                 success=tool_result.success,
@@ -308,6 +310,7 @@ class ExecutorService:
                 "metadata": tool_result.metadata or {},
             },
         )
+        await self.durable_repository.complete_if_finished(execution_id)
         return StepResult(
             step_id=step_id,
             success=True,

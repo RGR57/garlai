@@ -102,6 +102,19 @@ class DurableExecutorServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(loaded.steps[0].status, DurableStepStatus.COMPLETED)
         self.assertEqual(tool.calls, [{"action": "read_file", "path": "out.txt"}])
 
+    async def test_read_only_step_with_durable_operation_identity_executes(self):
+        repository, tool = await self._repository_and_tool(
+            action="read_file",
+            arguments={"action": "read_file", "path": "out.txt"},
+            operation_id="operation-1",
+        )
+        result = await self._executor(repository, tool).execute_ready_step(
+            "run-1", 1, [], ExecutionState()
+        )
+
+        self.assertTrue(result.success)
+        self.assertEqual(tool.calls, [{"action": "read_file", "path": "out.txt"}])
+
     async def _repository_and_tool(
         self,
         *,
@@ -109,6 +122,7 @@ class DurableExecutorServiceTests(unittest.IsolatedAsyncioTestCase):
         tool: RecordingFilesystemTool | None = None,
         action: str = "write file",
         arguments: dict | None = None,
+        operation_id: str | None = None,
     ):
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)
@@ -134,7 +148,11 @@ class DurableExecutorServiceTests(unittest.IsolatedAsyncioTestCase):
                     arguments=arguments,
                     resolved_arguments=arguments,
                     status=status,
-                    operation_id="operation-1" if arguments["action"] == "write_file" else None,
+                    operation_id=(
+                        operation_id
+                        if operation_id is not None
+                        else "operation-1" if arguments["action"] == "write_file" else None
+                    ),
                     payload_hash=payload_hash if arguments["action"] == "write_file" else None,
                     result={"output": "written"}
                     if status is DurableStepStatus.COMPLETED
