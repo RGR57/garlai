@@ -26,6 +26,11 @@ class BaseTool(ABC):
         ...
 
     @property
+    def supports_idempotency_key(self) -> bool:
+        """Whether this tool can safely reuse a stable GARL operation ID."""
+        return False
+
+    @property
     def input_schema(self) -> dict[str, Any]:
         """
         Describes the arguments accepted by the tool.
