@@ -78,6 +78,7 @@ class ExecutorService:
         step_id: int,
         messages: list[ConversationMessage],
         state: ExecutionState,
+        approved_payload_hash: str | None = None,
     ) -> StepResult:
         if self.durable_repository is None:
             raise RuntimeError("Durable execution repository is not configured.")
@@ -145,7 +146,10 @@ class ExecutorService:
                 action=step.action,
                 metadata={"permission_decision": permission.decision.value},
             )
-        if permission.decision is PermissionDecision.REQUIRE_APPROVAL:
+        if (
+            permission.decision is PermissionDecision.REQUIRE_APPROVAL
+            and approved_payload_hash != step.payload_hash
+        ):
             return StepResult(
                 step_id=step_id,
                 success=False,

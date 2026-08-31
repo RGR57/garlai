@@ -11,6 +11,9 @@ from typing import TypeVar
 
 from src.models.durable_execution import (
     DurableStateCorruptionError,
+    ApprovalEventType,
+    ApprovalPayloadMismatchError,
+    ApprovalRequest,
     DurableStep,
     DurableStepStatus,
     ExecutionRun,
@@ -156,6 +159,26 @@ class SQLiteDurableExecutionRepository(DurableExecutionRepository):
                 error=error,
             )
         )
+
+    async def request_approval(self, approval: ApprovalRequest) -> None:
+        await self._run(lambda: self._request_approval(approval))
+
+    async def get_approval(
+        self, execution_id: str, approval_id: str
+    ) -> ApprovalRequest:
+        return await self._run(
+            lambda: self._get_approval(execution_id, approval_id)
+        )
+
+    async def approve(
+        self, execution_id: str, approval_id: str, payload_hash: str
+    ) -> ApprovalRequest:
+        return await self._run(
+            lambda: self._approve(execution_id, approval_id, payload_hash)
+        )
+
+    async def reject(self, execution_id: str, approval_id: str) -> None:
+        await self._run(lambda: self._reject(execution_id, approval_id))
 
     async def _run(self, operation: Callable[[], T]) -> T:
         return await asyncio.to_thread(operation)
@@ -769,6 +792,189 @@ class SQLiteDurableExecutionRepository(DurableExecutionRepository):
         finally:
             connection.close()
 
+    def _request_approval(self, approval: ApprovalRequest) -> None:
+        payload = _approval_payload(approval)
+        connection = self._connect()
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            updated = connection.execute(
+                """
+                UPDATE execution_steps SET status = ?, updated_at = ?
+                WHERE execution_id = ? AND step_id = ? AND status = ?
+                  AND operation_id = ? AND payload_hash = ?
+                """,
+                (
+                    DurableStepStatus.WAITING_APPROVAL.value,
+                    _now(),
+                    approval.execution_id,
+                    approval.step_id,
+                    DurableStepStatus.PENDING.value,
+                    approval.operation_id,
+                    approval.payload_hash,
+                ),
+            ).rowcount
+            if updated != 1:
+                raise ValueError("Approval request does not match a pending operation.")
+            connection.execute(
+                """
+                INSERT INTO approval_journal (
+                    approval_event_id, approval_id, execution_id, step_id,
+                    operation_id, event_type, canonical_payload_json, payload_hash,
+                    occurred_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    str(uuid.uuid4()), approval.approval_id, approval.execution_id,
+                    approval.step_id, approval.operation_id,
+                    ApprovalEventType.REQUESTED.value, _encode_json(payload),
+                    approval.payload_hash, _now(),
+                ),
+            )
+            run_updated = connection.execute(
+                """
+                UPDATE execution_runs SET status = ?, updated_at = ?
+                WHERE execution_id = ? AND status = ?
+                """,
+                (
+                    ExecutionRunStatus.WAITING_APPROVAL.value, _now(),
+                    approval.execution_id, ExecutionRunStatus.RUNNING.value,
+                ),
+            ).rowcount
+            if run_updated != 1:
+                raise ValueError("Approval request requires a running execution.")
+            connection.commit()
+        except Exception:
+            connection.rollback()
+            raise
+        finally:
+            connection.close()
+
+    def _get_approval(self, execution_id: str, approval_id: str) -> ApprovalRequest:
+        connection = self._connect()
+        try:
+            rows = connection.execute(
+                """
+                SELECT * FROM approval_journal WHERE execution_id = ? AND approval_id = ?
+                ORDER BY occurred_at, rowid
+                """, (execution_id, approval_id)
+            ).fetchall()
+            if not rows:
+                raise KeyError("Unknown approval for this execution.")
+            requested = next(
+                (row for row in rows if row["event_type"] == ApprovalEventType.REQUESTED.value),
+                None,
+            )
+            if requested is None:
+                raise DurableStateCorruptionError("Approval is missing its request fact.")
+            payload = _decode_mapping(requested["canonical_payload_json"], "approval payload")
+            return ApprovalRequest(
+                approval_id=approval_id, execution_id=execution_id,
+                step_id=requested["step_id"], operation_id=requested["operation_id"],
+                tool=payload["tool"], action=payload["action"],
+                arguments=payload["arguments"], reason=payload["reason"],
+                risk_level=payload["risk_level"], payload_hash=requested["payload_hash"],
+                event_type=ApprovalEventType(rows[-1]["event_type"]),
+                requested_at=_decode_time(requested["occurred_at"], "approval occurred_at"),
+            )
+        finally:
+            connection.close()
+
+    def _approve(
+        self, execution_id: str, approval_id: str, payload_hash: str
+    ) -> ApprovalRequest:
+        connection = self._connect()
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            approval = self._get_approval_in_transaction(connection, execution_id, approval_id)
+            approval.assert_authorizes(execution_id=execution_id, payload_hash=payload_hash)
+            if approval.event_type is not ApprovalEventType.REQUESTED:
+                raise ValueError("Approval is no longer pending.")
+            updated = connection.execute(
+                """
+                UPDATE execution_steps SET status = ?, updated_at = ?
+                WHERE execution_id = ? AND step_id = ? AND status = ?
+                  AND operation_id = ? AND payload_hash = ?
+                """, (
+                    DurableStepStatus.PENDING.value, _now(), execution_id,
+                    approval.step_id, DurableStepStatus.WAITING_APPROVAL.value,
+                    approval.operation_id, approval.payload_hash,
+                )
+            ).rowcount
+            if updated != 1:
+                raise ValueError("Approved operation no longer matches its frozen step.")
+            connection.execute(
+                """
+                INSERT INTO approval_journal (
+                    approval_event_id, approval_id, execution_id, step_id,
+                    operation_id, event_type, canonical_payload_json, payload_hash,
+                    occurred_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    str(uuid.uuid4()), approval_id, execution_id, approval.step_id,
+                    approval.operation_id, ApprovalEventType.APPROVED.value,
+                    _encode_json(_approval_payload(approval)), approval.payload_hash, _now(),
+                )
+            )
+            connection.execute(
+                "UPDATE execution_runs SET status = ?, updated_at = ? WHERE execution_id = ? AND status = ?",
+                (ExecutionRunStatus.RUNNING.value, _now(), execution_id, ExecutionRunStatus.WAITING_APPROVAL.value),
+            )
+            connection.commit()
+            return ApprovalRequest(**{**approval.__dict__, "event_type": ApprovalEventType.APPROVED})
+        except Exception:
+            connection.rollback()
+            raise
+        finally:
+            connection.close()
+
+    def _reject(self, execution_id: str, approval_id: str) -> None:
+        connection = self._connect()
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            approval = self._get_approval_in_transaction(connection, execution_id, approval_id)
+            if approval.event_type is not ApprovalEventType.REQUESTED:
+                raise ValueError("Approval is no longer pending.")
+            updated = connection.execute(
+                "UPDATE execution_steps SET status = ?, updated_at = ? WHERE execution_id = ? AND step_id = ? AND status = ?",
+                (DurableStepStatus.REJECTED.value, _now(), execution_id, approval.step_id, DurableStepStatus.WAITING_APPROVAL.value),
+            ).rowcount
+            if updated != 1:
+                raise ValueError("Rejected operation no longer matches its frozen step.")
+            connection.execute(
+                """
+                INSERT INTO approval_journal (approval_event_id, approval_id, execution_id, step_id, operation_id, event_type, canonical_payload_json, payload_hash, occurred_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (str(uuid.uuid4()), approval_id, execution_id, approval.step_id, approval.operation_id, ApprovalEventType.REJECTED.value, _encode_json(_approval_payload(approval)), approval.payload_hash, _now())
+            )
+            connection.execute(
+                "UPDATE execution_runs SET status = ?, updated_at = ? WHERE execution_id = ? AND status = ?",
+                (ExecutionRunStatus.FAILED.value, _now(), execution_id, ExecutionRunStatus.WAITING_APPROVAL.value),
+            )
+            connection.commit()
+        except Exception:
+            connection.rollback()
+            raise
+        finally:
+            connection.close()
+
+    def _get_approval_in_transaction(self, connection, execution_id, approval_id):
+        rows = connection.execute(
+            "SELECT * FROM approval_journal WHERE execution_id = ? AND approval_id = ? ORDER BY occurred_at, rowid",
+            (execution_id, approval_id),
+        ).fetchall()
+        if not rows:
+            raise KeyError("Unknown approval for this execution.")
+        requested = next((row for row in rows if row["event_type"] == ApprovalEventType.REQUESTED.value), None)
+        if requested is None:
+            raise DurableStateCorruptionError("Approval is missing its request fact.")
+        payload = _decode_mapping(requested["canonical_payload_json"], "approval payload")
+        return ApprovalRequest(
+            approval_id=approval_id, execution_id=execution_id, step_id=requested["step_id"], operation_id=requested["operation_id"],
+            tool=payload["tool"], action=payload["action"], arguments=payload["arguments"], reason=payload["reason"],
+            risk_level=payload["risk_level"], payload_hash=requested["payload_hash"],
+            event_type=ApprovalEventType(rows[-1]["event_type"]), requested_at=_decode_time(requested["occurred_at"], "approval occurred_at"),
+        )
+
 
 _MIGRATION_1_STATEMENTS = (
     """
@@ -866,6 +1072,16 @@ def _encode_json(value: object) -> str:
         )
     except (TypeError, ValueError) as exc:
         raise ValueError("Durable values must be constrained JSON") from exc
+
+
+def _approval_payload(approval: ApprovalRequest) -> dict:
+    return {
+        "tool": approval.tool,
+        "action": approval.action,
+        "arguments": approval.arguments,
+        "reason": approval.reason,
+        "risk_level": approval.risk_level,
+    }
 
 
 def _encode_optional_json(value: object | None) -> str | None:

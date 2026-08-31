@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Protocol
 
 from src.models.durable_execution import (
+    ApprovalRequest,
     DurableStep,
     DurableStepStatus,
     ExecutionRun,
@@ -77,3 +78,19 @@ class DurableExecutionRepository(Protocol):
         error: dict | None = None,
     ) -> None:
         """Persist the confirmed outcome of a claimed read-only step."""
+
+    async def request_approval(self, approval: ApprovalRequest) -> None:
+        """Persist an immutable approval request for one exact operation."""
+
+    async def get_approval(
+        self, execution_id: str, approval_id: str
+    ) -> ApprovalRequest:
+        """Load an immutable approval by authoritative execution identity."""
+
+    async def approve(
+        self, execution_id: str, approval_id: str, payload_hash: str
+    ) -> ApprovalRequest:
+        """Approve exactly one frozen payload and make its step claimable."""
+
+    async def reject(self, execution_id: str, approval_id: str) -> None:
+        """Reject one frozen approval without invoking its operation."""
