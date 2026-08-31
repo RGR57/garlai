@@ -82,6 +82,31 @@ class CognitivePipeline:
         self.plan_scorer = (
             plan_scorer
         )
+
+    async def run_persisted_step(
+        self,
+        *,
+        execution_id: str,
+        step_id: int,
+        messages: list[ConversationMessage],
+        state: CognitiveState,
+    ) -> ChatResponse:
+        """Execute one recovered cursor without regenerating its validated plan."""
+        result = await self.executor.execute_ready_step(
+            execution_id,
+            step_id,
+            messages,
+            state.execution,
+        )
+        state.execution.current_step = step_id
+        state.execution.record(result)
+        if result.success:
+            state.execution.variables[f"step{step_id}"] = result.output
+            return ChatResponse(response=str(result.output))
+        return ChatResponse(
+            response=result.error or "Persisted step execution failed."
+        )
+
     async def run(
         self,
         messages: list[ConversationMessage],

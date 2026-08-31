@@ -205,6 +205,15 @@ class OperationClaim:
 
 
 @dataclass(frozen=True)
+class OrphanedOperation:
+    """A committed consequential intent with no durable terminal fact."""
+
+    execution_id: str
+    step_id: int
+    operation_id: str
+
+
+@dataclass(frozen=True)
 class ApprovalRequest:
     approval_id: str
     execution_id: str

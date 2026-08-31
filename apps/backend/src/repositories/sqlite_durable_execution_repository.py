@@ -20,6 +20,7 @@ from src.models.durable_execution import (
     ExecutionRunStatus,
     OperationClaim,
     OperationEventType,
+    OrphanedOperation,
 )
 from src.repositories.durable_execution_repository import DurableExecutionRepository
 
@@ -136,6 +137,13 @@ class SQLiteDurableExecutionRepository(DurableExecutionRepository):
             )
         )
 
+    async def list_orphaned_operations(
+        self, execution_id: str
+    ) -> list[OrphanedOperation]:
+        return await self._run(
+            lambda: self._list_orphaned_operations(execution_id)
+        )
+
     async def claim_read_only_step(self, execution_id: str, step_id: int) -> bool:
         return await self._run(
             lambda: self._claim_read_only_step(execution_id, step_id)
@@ -168,6 +176,13 @@ class SQLiteDurableExecutionRepository(DurableExecutionRepository):
     ) -> ApprovalRequest:
         return await self._run(
             lambda: self._get_approval(execution_id, approval_id)
+        )
+
+    async def get_pending_approval(
+        self, execution_id: str
+    ) -> ApprovalRequest | None:
+        return await self._run(
+            lambda: self._get_pending_approval(execution_id)
         )
 
     async def approve(
@@ -512,6 +527,44 @@ class SQLiteDurableExecutionRepository(DurableExecutionRepository):
                     """,
                     (operation_id,),
                 )
+            ]
+        finally:
+            connection.close()
+
+    def _list_orphaned_operations(
+        self, execution_id: str
+    ) -> list[OrphanedOperation]:
+        connection = self._connect()
+        try:
+            rows = connection.execute(
+                """
+                SELECT intent.execution_id, intent.step_id, intent.operation_id
+                FROM operation_journal AS intent
+                WHERE intent.execution_id = ?
+                  AND intent.event_type = ?
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM operation_journal AS terminal
+                      WHERE terminal.operation_id = intent.operation_id
+                        AND terminal.event_type IN (?, ?, ?)
+                  )
+                ORDER BY intent.step_id
+                """,
+                (
+                    execution_id,
+                    OperationEventType.INTENT_RECORDED.value,
+                    OperationEventType.COMPLETED.value,
+                    OperationEventType.KNOWN_FAILED.value,
+                    OperationEventType.UNCERTAIN.value,
+                ),
+            ).fetchall()
+            return [
+                OrphanedOperation(
+                    execution_id=row["execution_id"],
+                    step_id=row["step_id"],
+                    operation_id=row["operation_id"],
+                )
+                for row in rows
             ]
         finally:
             connection.close()
@@ -875,6 +928,46 @@ class SQLiteDurableExecutionRepository(DurableExecutionRepository):
                 risk_level=payload["risk_level"], payload_hash=requested["payload_hash"],
                 event_type=ApprovalEventType(rows[-1]["event_type"]),
                 requested_at=_decode_time(requested["occurred_at"], "approval occurred_at"),
+            )
+        finally:
+            connection.close()
+
+    def _get_pending_approval(
+        self, execution_id: str
+    ) -> ApprovalRequest | None:
+        connection = self._connect()
+        try:
+            rows = connection.execute(
+                """
+                SELECT requested.approval_id
+                FROM approval_journal AS requested
+                WHERE requested.execution_id = ?
+                  AND requested.event_type = ?
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM approval_journal AS terminal
+                      WHERE terminal.approval_id = requested.approval_id
+                        AND terminal.event_type IN (?, ?)
+                  )
+                ORDER BY requested.occurred_at, requested.rowid
+                """,
+                (
+                    execution_id,
+                    ApprovalEventType.REQUESTED.value,
+                    ApprovalEventType.APPROVED.value,
+                    ApprovalEventType.REJECTED.value,
+                ),
+            ).fetchall()
+            if not rows:
+                return None
+            if len(rows) != 1:
+                raise DurableStateCorruptionError(
+                    "A durable execution has more than one pending approval."
+                )
+            return self._get_approval_in_transaction(
+                connection,
+                execution_id,
+                rows[0]["approval_id"],
             )
         finally:
             connection.close()

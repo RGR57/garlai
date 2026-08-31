@@ -8,6 +8,7 @@ from src.models.durable_execution import (
     DurableStepStatus,
     ExecutionRun,
     OperationClaim,
+    OrphanedOperation,
 )
 
 
@@ -65,6 +66,11 @@ class DurableExecutionRepository(Protocol):
     ) -> None:
         """Stop recovery when a claimed consequential invocation is ambiguous."""
 
+    async def list_orphaned_operations(
+        self, execution_id: str
+    ) -> list[OrphanedOperation]:
+        """List committed intents that have no durable terminal outcome."""
+
     async def claim_read_only_step(self, execution_id: str, step_id: int) -> bool:
         """Conditionally begin a retry-safe read-only step."""
 
@@ -86,6 +92,11 @@ class DurableExecutionRepository(Protocol):
         self, execution_id: str, approval_id: str
     ) -> ApprovalRequest:
         """Load an immutable approval by authoritative execution identity."""
+
+    async def get_pending_approval(
+        self, execution_id: str
+    ) -> ApprovalRequest | None:
+        """Load the sole frozen approval that keeps this run paused, if any."""
 
     async def approve(
         self, execution_id: str, approval_id: str, payload_hash: str
