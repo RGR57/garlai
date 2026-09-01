@@ -108,17 +108,61 @@ class ExecutorService:
                 metadata={"durable_skip": True},
             )
         if step.tool is None:
-            return StepResult(
-                step_id=step_id,
-                success=False,
-                error="Durable LLM-only steps are not yet resumable.",
-                action=step.action,
+            claimed = await self.durable_repository.claim_read_only_step(
+                execution_id,
+                step_id,
             )
+            if not claimed:
+                return StepResult(
+                    step_id=step_id,
+                    success=False,
+                    error="LLM step is already claimed.",
+                    action=step.action,
+                    metadata={"durable_skip": True},
+                )
+            llm_step = PlanStep(
+                id=step.step_id,
+                action=step.action,
+                input=step.plan_input,
+            )
+            result = await self._execute_llm_step(
+                llm_step,
+                self.variable_resolver.resolve(step.plan_input, state),
+                messages,
+            )
+            status = (
+                DurableStepStatus.COMPLETED
+                if result.success
+                else DurableStepStatus.KNOWN_FAILED
+            )
+            await self.durable_repository.record_read_only_outcome(
+                execution_id,
+                step_id,
+                status,
+                result={"output": result.output, "metadata": result.metadata}
+                if result.success
+                else None,
+                error={"message": result.error or "LLM step failed."}
+                if not result.success
+                else None,
+            )
+            if result.success:
+                await self.durable_repository.complete_if_finished(execution_id)
+            return result
 
-        arguments = self.variable_resolver.resolve(
-            step.resolved_arguments or step.arguments,
-            state,
+        resolved_arguments = (
+            step.resolved_arguments
+            if step.resolved_arguments is not None
+            else self.variable_resolver.resolve(step.arguments, state)
         )
+        step = await self.durable_repository.prepare_tool_step(
+            execution_id,
+            step_id,
+            resolved_arguments,
+        )
+        arguments = step.resolved_arguments
+        if arguments is None:
+            raise RuntimeError("Prepared durable tool step has no resolved arguments.")
         tool = self.tool_manager.get(step.tool)
         if tool is None:
             return StepResult(

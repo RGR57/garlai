@@ -66,6 +66,11 @@ class DurableExecutionMissionTests(unittest.IsolatedAsyncioTestCase):
         )
         first_tool = RecordingFilesystemTool(["source output"])
         await self._executor(first_repository, first_tool).execute_ready_step("run-1", 1, [], ExecutionState())
+        checkpoint = await first_repository.load("run-1")
+
+        self.assertEqual(checkpoint.current_step_id, 1)
+        self.assertEqual(checkpoint.next_step_id, 2)
+        self.assertEqual(checkpoint.variables["step1"], "source output")
 
         second_repository = SQLiteDurableExecutionRepository(path)
         decision = await RecoveryService(second_repository).prepare_resume("run-1")

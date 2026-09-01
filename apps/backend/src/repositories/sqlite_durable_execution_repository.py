@@ -21,6 +21,7 @@ from src.models.durable_execution import (
     OperationClaim,
     OperationEventType,
     OrphanedOperation,
+    canonical_payload_hash,
 )
 from src.repositories.durable_execution_repository import DurableExecutionRepository
 
@@ -142,6 +143,20 @@ class SQLiteDurableExecutionRepository(DurableExecutionRepository):
     ) -> list[OrphanedOperation]:
         return await self._run(
             lambda: self._list_orphaned_operations(execution_id)
+        )
+
+    async def prepare_tool_step(
+        self,
+        execution_id: str,
+        step_id: int,
+        resolved_arguments: dict,
+    ) -> DurableStep:
+        return await self._run(
+            lambda: self._prepare_tool_step(
+                execution_id,
+                step_id,
+                resolved_arguments,
+            )
         )
 
     async def claim_read_only_step(self, execution_id: str, step_id: int) -> bool:
@@ -662,6 +677,19 @@ class SQLiteDurableExecutionRepository(DurableExecutionRepository):
                     DurableStepStatus.EXECUTING.value,
                 ),
             )
+            if status is DurableStepStatus.COMPLETED:
+                self._checkpoint_completed_step(
+                    connection,
+                    claim.execution_id,
+                    claim.step_id,
+                    result,
+                )
+            else:
+                self._fail_run_after_known_failure(
+                    connection,
+                    claim.execution_id,
+                    claim.step_id,
+                )
             connection.execute(
                 """
                 INSERT INTO operation_journal (
@@ -820,6 +848,69 @@ class SQLiteDurableExecutionRepository(DurableExecutionRepository):
         finally:
             connection.close()
 
+    def _prepare_tool_step(
+        self,
+        execution_id: str,
+        step_id: int,
+        resolved_arguments: dict,
+    ) -> DurableStep:
+        encoded_arguments = _encode_json(resolved_arguments)
+        connection = self._connect()
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute(
+                """
+                SELECT tool, action, status, resolved_arguments_json
+                FROM execution_steps
+                WHERE execution_id = ? AND step_id = ?
+                """,
+                (execution_id, step_id),
+            ).fetchone()
+            if row is None or row["tool"] is None:
+                raise ValueError("Durable step is not a tool step.")
+            if row["status"] != DurableStepStatus.PENDING.value:
+                raise ValueError("Durable tool step is no longer pending.")
+            if (
+                row["resolved_arguments_json"] is not None
+                and row["resolved_arguments_json"] != encoded_arguments
+            ):
+                raise ValueError("Durable tool payload is already frozen.")
+
+            payload_hash = canonical_payload_hash(
+                row["tool"],
+                row["action"],
+                resolved_arguments,
+            )
+            updated = connection.execute(
+                """
+                UPDATE execution_steps
+                SET resolved_arguments_json = ?, payload_hash = ?, updated_at = ?
+                WHERE execution_id = ? AND step_id = ? AND status = ?
+                """,
+                (
+                    encoded_arguments,
+                    payload_hash,
+                    _now(),
+                    execution_id,
+                    step_id,
+                    DurableStepStatus.PENDING.value,
+                ),
+            ).rowcount
+            if updated != 1:
+                raise ValueError("Durable tool step could not be prepared.")
+            connection.commit()
+        except Exception:
+            connection.rollback()
+            raise
+        finally:
+            connection.close()
+
+        return next(
+            step
+            for step in self._load(execution_id).steps
+            if step.step_id == step_id
+        )
+
     def _claim_read_only_step(self, execution_id: str, step_id: int) -> bool:
         connection = self._connect()
         try:
@@ -862,6 +953,7 @@ class SQLiteDurableExecutionRepository(DurableExecutionRepository):
             raise ValueError("Read-only steps require a confirmed outcome.")
         connection = self._connect()
         try:
+            connection.execute("BEGIN IMMEDIATE")
             updated = connection.execute(
                 """
                 UPDATE execution_steps
@@ -880,8 +972,91 @@ class SQLiteDurableExecutionRepository(DurableExecutionRepository):
             ).rowcount
             if updated != 1:
                 raise ValueError("Read-only step is not awaiting an outcome.")
+            if status is DurableStepStatus.COMPLETED:
+                self._checkpoint_completed_step(
+                    connection,
+                    execution_id,
+                    step_id,
+                    result,
+                )
+            else:
+                self._fail_run_after_known_failure(
+                    connection,
+                    execution_id,
+                    step_id,
+                )
+            connection.commit()
+        except Exception:
+            connection.rollback()
+            raise
         finally:
             connection.close()
+
+    def _checkpoint_completed_step(
+        self,
+        connection: sqlite3.Connection,
+        execution_id: str,
+        step_id: int,
+        result: dict | None,
+    ) -> None:
+        run = connection.execute(
+            """
+            SELECT status, variables_json FROM execution_runs
+            WHERE execution_id = ?
+            """,
+            (execution_id,),
+        ).fetchone()
+        if run is None or run["status"] != ExecutionRunStatus.RUNNING.value:
+            raise ValueError("Completed step requires a running durable execution.")
+        variables = _decode_mapping(run["variables_json"], "variables")
+        variables[f"step{step_id}"] = result.get("output") if result else None
+        next_step = connection.execute(
+            """
+            SELECT step_id FROM execution_steps
+            WHERE execution_id = ? AND status = ?
+            ORDER BY ordinal
+            LIMIT 1
+            """,
+            (execution_id, DurableStepStatus.PENDING.value),
+        ).fetchone()
+        connection.execute(
+            """
+            UPDATE execution_runs
+            SET current_step_id = ?, next_step_id = ?, variables_json = ?, updated_at = ?
+            WHERE execution_id = ? AND status = ?
+            """,
+            (
+                step_id,
+                next_step["step_id"] if next_step is not None else None,
+                _encode_json(variables),
+                _now(),
+                execution_id,
+                ExecutionRunStatus.RUNNING.value,
+            ),
+        )
+
+    @staticmethod
+    def _fail_run_after_known_failure(
+        connection: sqlite3.Connection,
+        execution_id: str,
+        step_id: int,
+    ) -> None:
+        updated = connection.execute(
+            """
+            UPDATE execution_runs
+            SET status = ?, current_step_id = ?, next_step_id = NULL, updated_at = ?
+            WHERE execution_id = ? AND status = ?
+            """,
+            (
+                ExecutionRunStatus.FAILED.value,
+                step_id,
+                _now(),
+                execution_id,
+                ExecutionRunStatus.RUNNING.value,
+            ),
+        ).rowcount
+        if updated != 1:
+            raise ValueError("Known failure requires a running durable execution.")
 
     def _request_approval(self, approval: ApprovalRequest) -> None:
         payload = _approval_payload(approval)

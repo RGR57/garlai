@@ -71,6 +71,14 @@ class DurableExecutionRepository(Protocol):
     ) -> list[OrphanedOperation]:
         """List committed intents that have no durable terminal outcome."""
 
+    async def prepare_tool_step(
+        self,
+        execution_id: str,
+        step_id: int,
+        resolved_arguments: dict,
+    ) -> DurableStep:
+        """Freeze one pending tool payload before it can be authorized or invoked."""
+
     async def claim_read_only_step(self, execution_id: str, step_id: int) -> bool:
         """Conditionally begin a retry-safe read-only step."""
 
