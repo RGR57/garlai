@@ -92,6 +92,32 @@ class AlwaysFailingExecutor:
         return "timeout while calling tool"
 
 
+class PersistedPlanExecutor:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, int]] = []
+
+    async def execute_ready_step(
+        self,
+        execution_id,
+        step_id,
+        messages,
+        state,
+    ) -> StepResult:
+        self.calls.append((execution_id, step_id))
+        return StepResult(
+            step_id=step_id,
+            success=True,
+            output="second output",
+            tool="filesystem",
+            action="read second input",
+        )
+
+
+class PlannerMustNotRun:
+    async def generate(self, messages, state, candidates=1):
+        raise AssertionError("Persisted-plan continuation must not generate a plan.")
+
+
 class FakeReviewer:
 
     async def review(
@@ -174,6 +200,34 @@ class CognitivePipelineTests(
         )
         self.assertEqual(executor.calls, 2)
         self.assertEqual(len(state.execution.history), 2)
+
+    async def test_persisted_continuation_executes_only_recovered_cursor(self):
+        executor = PersistedPlanExecutor()
+        pipeline = CognitivePipeline(
+            planner=None,
+            executor=executor,
+            reviewer=FakeReviewer(),
+            decision=AlwaysRetryDecision(),
+            reasoning=FakeReasoning(),
+            response_composer=FakeResponseComposer(),
+            candidate_plan_generator=PlannerMustNotRun(),
+            plan_validator=FakePlanValidator(),
+            plan_scorer=FakePlanScorer(),
+        )
+        state = CognitiveState(objective="continue persisted work")
+        state.execution.variables["step1"] = "first output"
+
+        response = await pipeline.run_persisted_step(
+            execution_id="run-1",
+            step_id=2,
+            messages=[],
+            state=state,
+        )
+
+        self.assertEqual(executor.calls, [("run-1", 2)])
+        self.assertEqual(state.execution.variables["step1"], "first output")
+        self.assertEqual(state.execution.variables["step2"], "second output")
+        self.assertEqual(response.response, "second output")
 
 
 if __name__ == "__main__":

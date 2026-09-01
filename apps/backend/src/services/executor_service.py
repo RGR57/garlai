@@ -1,4 +1,5 @@
 from pathlib import Path
+import uuid
 
 from src.core.prompts import SystemPrompts
 
@@ -15,6 +16,7 @@ from src.models.execution_state import (
     ExecutionState,
     StepResult,
 )
+from src.models.durable_execution import ApprovalRequest, DurableStepStatus
 
 from src.models.plan import (
     ExecutionPlan,
@@ -40,6 +42,9 @@ from src.services.permission_service import (
 from src.services.variable_resolver import (
     VariableResolver,
 )
+from src.repositories.durable_execution_repository import (
+    DurableExecutionRepository,
+)
 
 from src.tools.tool_manager import (
     ToolManager,
@@ -59,12 +64,305 @@ class ExecutorService:
         tool_manager: ToolManager,
         variable_resolver: VariableResolver,
         permission_service: PermissionService,
+        durable_repository: DurableExecutionRepository | None = None,
     ):
         self.llm = llm
         self.context_builder = context_builder
         self.tool_manager = tool_manager
         self.variable_resolver = variable_resolver
         self.permission_service = permission_service
+        self.durable_repository = durable_repository
+
+    async def execute_ready_step(
+        self,
+        execution_id: str,
+        step_id: int,
+        messages: list[ConversationMessage],
+        state: ExecutionState,
+        approved_payload_hash: str | None = None,
+    ) -> StepResult:
+        if self.durable_repository is None:
+            raise RuntimeError("Durable execution repository is not configured.")
+
+        run = await self.durable_repository.load(execution_id)
+        step = next((item for item in run.steps if item.step_id == step_id), None)
+        if step is None:
+            raise KeyError(f"Execution step {step_id} was not found.")
+        if step.status is DurableStepStatus.COMPLETED:
+            output = step.result.get("output") if step.result else None
+            return StepResult(
+                step_id=step_id,
+                success=True,
+                output=output,
+                tool=step.tool,
+                action=step.action,
+                metadata={"durable_skip": True},
+            )
+        if step.status is not DurableStepStatus.PENDING:
+            return StepResult(
+                step_id=step_id,
+                success=False,
+                error=f"Durable step is {step.status.value}.",
+                tool=step.tool,
+                action=step.action,
+                metadata={"durable_skip": True},
+            )
+        if step.tool is None:
+            claimed = await self.durable_repository.claim_read_only_step(
+                execution_id,
+                step_id,
+            )
+            if not claimed:
+                return StepResult(
+                    step_id=step_id,
+                    success=False,
+                    error="LLM step is already claimed.",
+                    action=step.action,
+                    metadata={"durable_skip": True},
+                )
+            llm_step = PlanStep(
+                id=step.step_id,
+                action=step.action,
+                input=step.plan_input,
+            )
+            result = await self._execute_llm_step(
+                llm_step,
+                self.variable_resolver.resolve(step.plan_input, state),
+                messages,
+            )
+            status = (
+                DurableStepStatus.COMPLETED
+                if result.success
+                else DurableStepStatus.KNOWN_FAILED
+            )
+            await self.durable_repository.record_read_only_outcome(
+                execution_id,
+                step_id,
+                status,
+                result={"output": result.output, "metadata": result.metadata}
+                if result.success
+                else None,
+                error={"message": result.error or "LLM step failed."}
+                if not result.success
+                else None,
+            )
+            if result.success:
+                await self.durable_repository.complete_if_finished(execution_id)
+            return result
+
+        resolved_arguments = (
+            step.resolved_arguments
+            if step.resolved_arguments is not None
+            else self.variable_resolver.resolve(step.arguments, state)
+        )
+        step = await self.durable_repository.prepare_tool_step(
+            execution_id,
+            step_id,
+            resolved_arguments,
+        )
+        arguments = step.resolved_arguments
+        if arguments is None:
+            raise RuntimeError("Prepared durable tool step has no resolved arguments.")
+        tool = self.tool_manager.get(step.tool)
+        if tool is None:
+            return StepResult(
+                step_id=step_id,
+                success=False,
+                error=f"Tool '{step.tool}' not found.",
+                tool=step.tool,
+                action=step.action,
+            )
+        valid, error = self.tool_manager.validate_arguments(step.tool, arguments)
+        if not valid:
+            return StepResult(
+                step_id=step_id,
+                success=False,
+                error=error,
+                tool=step.tool,
+                action=step.action,
+            )
+        permission = self.permission_service.evaluate(step.tool, arguments)
+        if permission.decision is PermissionDecision.DENY:
+            return StepResult(
+                step_id=step_id,
+                success=False,
+                error=permission.reason,
+                tool=step.tool,
+                action=step.action,
+                metadata={"permission_decision": permission.decision.value},
+            )
+        if (
+            permission.decision is PermissionDecision.REQUIRE_APPROVAL
+            and approved_payload_hash != step.payload_hash
+        ):
+            if step.operation_id is None or step.payload_hash is None:
+                return StepResult(
+                    step_id=step_id,
+                    success=False,
+                    error="Approval-required durable step lacks an operation identity.",
+                    tool=step.tool,
+                    action=step.action,
+                )
+            approval = ApprovalRequest.create(
+                approval_id=str(uuid.uuid4()),
+                execution_id=execution_id,
+                step_id=step_id,
+                operation_id=step.operation_id,
+                tool=step.tool,
+                action=step.action,
+                arguments=arguments,
+                reason=permission.reason,
+                risk_level=permission.risk.value,
+            )
+            await self.durable_repository.request_approval(approval)
+            return StepResult(
+                step_id=step_id,
+                success=False,
+                error=f"Approval required: {permission.reason}",
+                tool=step.tool,
+                action=step.action,
+                metadata={"pending_approval_id": approval.approval_id},
+            )
+        if not permission.execution_policy.is_consequential:
+            claimed = await self.durable_repository.claim_read_only_step(
+                execution_id,
+                step_id,
+            )
+            if not claimed:
+                return StepResult(
+                    step_id=step_id,
+                    success=False,
+                    error="Read-only step is already claimed.",
+                    tool=step.tool,
+                    action=step.action,
+                    metadata={"durable_skip": True},
+                )
+            try:
+                tool_result = await tool.execute(**arguments)
+            except Exception as exc:
+                await self.durable_repository.record_read_only_outcome(
+                    execution_id,
+                    step_id,
+                    DurableStepStatus.KNOWN_FAILED,
+                    error={"message": str(exc)},
+                )
+                return StepResult(
+                    step_id=step_id,
+                    success=False,
+                    error=str(exc),
+                    tool=step.tool,
+                    action=step.action,
+                )
+            status = (
+                DurableStepStatus.COMPLETED
+                if tool_result.success
+                else DurableStepStatus.KNOWN_FAILED
+            )
+            error_value = None
+            if not tool_result.success:
+                error_value = {
+                    "message": (tool_result.metadata or {}).get(
+                        "error",
+                        "Tool execution failed.",
+                    )
+                }
+            await self.durable_repository.record_read_only_outcome(
+                execution_id,
+                step_id,
+                status,
+                result=(
+                    {"output": tool_result.output, "metadata": tool_result.metadata or {}}
+                    if tool_result.success
+                    else None
+                ),
+                error=error_value,
+            )
+            if tool_result.success:
+                await self.durable_repository.complete_if_finished(execution_id)
+            return StepResult(
+                step_id=step_id,
+                success=tool_result.success,
+                output=tool_result.output,
+                error=None if tool_result.success else error_value["message"],
+                tool=step.tool,
+                action=step.action,
+                metadata=tool_result.metadata or {},
+            )
+        if step.operation_id is None or step.payload_hash is None:
+            return StepResult(
+                step_id=step_id,
+                success=False,
+                error="Consequential durable step lacks an operation identity.",
+                tool=step.tool,
+                action=step.action,
+            )
+
+        claim = await self.durable_repository.claim_operation(
+            execution_id,
+            step_id,
+            step.operation_id,
+            step.payload_hash,
+        )
+        if not claim.granted:
+            return StepResult(
+                step_id=step_id,
+                success=False,
+                error="Operation is already claimed.",
+                tool=step.tool,
+                action=step.action,
+                metadata={"durable_skip": True},
+            )
+        try:
+            tool_result = await tool.execute(**arguments)
+        except Exception as exc:
+            await self.durable_repository.mark_operation_uncertain(
+                execution_id,
+                step_id,
+                step.operation_id,
+                type(exc).__name__,
+            )
+            return StepResult(
+                step_id=step_id,
+                success=False,
+                error="Consequential operation outcome is uncertain.",
+                tool=step.tool,
+                action=step.action,
+                metadata={"durable_status": "uncertain"},
+            )
+
+        if not tool_result.success:
+            await self.durable_repository.mark_operation_uncertain(
+                execution_id,
+                step_id,
+                step.operation_id,
+                "Consequential tool result did not prove side-effect absence.",
+            )
+            return StepResult(
+                step_id=step_id,
+                success=False,
+                error="Consequential operation outcome is uncertain.",
+                tool=step.tool,
+                action=step.action,
+                metadata={"durable_status": "uncertain"},
+            )
+
+        await self.durable_repository.record_operation_outcome(
+            claim,
+            DurableStepStatus.COMPLETED,
+            result={
+                "output": tool_result.output,
+                "metadata": tool_result.metadata or {},
+            },
+        )
+        await self.durable_repository.complete_if_finished(execution_id)
+        return StepResult(
+            step_id=step_id,
+            success=True,
+            output=tool_result.output,
+            tool=step.tool,
+            action=step.action,
+            metadata=tool_result.metadata or {},
+        )
 
     async def execute(
         self,

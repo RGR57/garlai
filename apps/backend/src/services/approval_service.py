@@ -2,6 +2,8 @@ from src.models.execution_state import (
     ExecutionState,
     StepResult,
 )
+from src.repositories.durable_execution_repository import DurableExecutionRepository
+from src.services.executor_service import ExecutorService
 from src.tools.tool_manager import ToolManager
 from src.utils.logger import logger
 
@@ -11,8 +13,48 @@ class ApprovalService:
     def __init__(
         self,
         tool_manager: ToolManager,
+        durable_repository: DurableExecutionRepository | None = None,
+        executor: ExecutorService | None = None,
     ):
         self.tool_manager = tool_manager
+        self.durable_repository = durable_repository
+        self.executor = executor
+
+    async def approve_durable(
+        self,
+        execution_id: str,
+        approval_id: str,
+        state: ExecutionState | None = None,
+    ) -> StepResult:
+        if self.durable_repository is None or self.executor is None:
+            raise RuntimeError("Durable approval dependencies are not configured.")
+
+        approval = await self.durable_repository.get_approval(
+            execution_id,
+            approval_id,
+        )
+        approved = await self.durable_repository.approve(
+            execution_id,
+            approval_id,
+            approval.payload_hash,
+        )
+        return await self.executor.execute_ready_step(
+            execution_id,
+            approved.step_id,
+            [],
+            state or ExecutionState(),
+            approved_payload_hash=approved.payload_hash,
+        )
+
+    async def reject_durable(
+        self,
+        execution_id: str,
+        approval_id: str,
+    ) -> str:
+        if self.durable_repository is None:
+            raise RuntimeError("Durable approval repository is not configured.")
+        await self.durable_repository.reject(execution_id, approval_id)
+        return "Pending action rejected. Nothing was executed."
 
     async def approve(
         self,

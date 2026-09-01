@@ -1,5 +1,6 @@
 from typing import ClassVar
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -14,6 +15,10 @@ class Settings(BaseSettings):
     LLM_MAX_RETRIES: int = 1
     LLM_FAKE_MODE: bool = False
     GROQ_API_KEY: str = ""
+    DURABLE_DB_PATH: str = Field(
+        default="runtime/garl-durable.sqlite3",
+        validation_alias="GARL_DURABLE_DB_PATH",
+    )
 
     @property
     def llm_model(self) -> str:

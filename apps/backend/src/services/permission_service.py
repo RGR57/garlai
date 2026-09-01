@@ -1,9 +1,14 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from src.models.tool_risk import (
     PermissionDecision,
     RiskLevel,
+)
+from src.services.execution_policy import (
+    CONSERVATIVE_POLICY,
+    READ_ONLY_POLICY,
+    ExecutionPolicy,
 )
 
 
@@ -12,6 +17,9 @@ class PermissionResult:
     decision: PermissionDecision
     risk: RiskLevel
     reason: str
+    execution_policy: ExecutionPolicy = field(
+        default_factory=lambda: CONSERVATIVE_POLICY
+    )
 
 
 class PermissionService:
@@ -34,34 +42,52 @@ class PermissionService:
     ) -> PermissionResult:
 
         if tool_name == "filesystem":
-            return self._evaluate_filesystem(
-                arguments
-            )
-
-        if tool_name == "terminal":
-            return self._evaluate_terminal(
-                arguments
-            )
-
-        if tool_name == "git":
-            return self._evaluate_git(
-                arguments
-            )
-
-        if tool_name == "calculator":
-            return self._allow(
+            result = self._evaluate_filesystem(arguments)
+        elif tool_name == "terminal":
+            result = self._evaluate_terminal(arguments)
+        elif tool_name == "git":
+            result = self._evaluate_git(arguments)
+        elif tool_name == "calculator":
+            result = self._allow(
                 RiskLevel.LOW,
                 "Calculator operations are non-mutating.",
             )
+        else:
+            # Unknown tools must never silently execute.
+            result = self._deny(
+                RiskLevel.CRITICAL,
+                (
+                    f"No permission policy exists for "
+                    f"tool '{tool_name}'."
+                ),
+            )
+        result.execution_policy = self._execution_policy(tool_name, arguments)
+        return result
 
-        # Unknown tools must never silently execute.
-        return self._deny(
-            RiskLevel.CRITICAL,
-            (
-                f"No permission policy exists for "
-                f"tool '{tool_name}'."
-            ),
-        )
+    def _execution_policy(
+        self,
+        tool_name: str,
+        arguments: dict[str, Any],
+    ) -> ExecutionPolicy:
+        if tool_name == "calculator":
+            return READ_ONLY_POLICY
+        if tool_name == "filesystem" and arguments.get("action") in {
+            "read_file",
+            "list_directory",
+            "exists",
+            "metadata",
+        }:
+            return READ_ONLY_POLICY
+        if tool_name == "git" and str(arguments.get("action", "")).lower() in {
+            "branch",
+            "status",
+            "log",
+            "diff",
+        }:
+            return READ_ONLY_POLICY
+
+        # Terminal and unclassified actions retain the conservative default.
+        return CONSERVATIVE_POLICY
 
     # ==========================================================
     # FILESYSTEM

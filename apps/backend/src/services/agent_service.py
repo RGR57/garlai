@@ -1,6 +1,9 @@
 from src.models.chat_response import (
     ChatResponse,
 )
+from src.models.cognitive_state import CognitiveState
+from src.models.durable_execution import ExecutionRunStatus
+from src.core.exceptions import GARLException
 
 from src.models.conversation import (
     ConversationMessage,
@@ -21,6 +24,7 @@ from src.services.approval_service import (
 from src.services.cognitive_pipeline import (
     CognitivePipeline,
 )
+from src.services.durable_execution_service import DurableExecutionService
 
 from src.services.knowledge_service import (
     KnowledgeService,
@@ -61,6 +65,7 @@ class AgentService:
         memory_service: MemoryService,
         knowledge_service: KnowledgeService,
         memory_extractor: MemoryExtractor,
+        durable_execution_service: DurableExecutionService | None = None,
     ):
 
         self.pipeline = pipeline
@@ -84,6 +89,7 @@ class AgentService:
         self.memory_extractor = (
             memory_extractor
         )
+        self.durable_execution_service = durable_execution_service
     # ======================================================
     # PUBLIC ENTRYPOINT
     # ======================================================
@@ -92,7 +98,17 @@ class AgentService:
         self,
         conversation_id: str,
         messages: list[ConversationMessage],
+        execution_id: str | None = None,
+        approval_id: str | None = None,
     ) -> ChatResponse:
+
+        if self.durable_execution_service is not None:
+            return await self._respond_durable(
+                conversation_id,
+                messages,
+                execution_id,
+                approval_id,
+            )
 
         state = self.state_repository.get_or_create(
             conversation_id
@@ -309,6 +325,117 @@ class AgentService:
         )
 
         return response
+
+    async def _respond_durable(
+        self,
+        conversation_id: str,
+        messages: list[ConversationMessage],
+        execution_id: str | None,
+        approval_id: str | None,
+    ) -> ChatResponse:
+        latest = messages[-1].content.strip()
+        normalized = latest.lower()
+        if execution_id is None:
+            if normalized in self.APPROVAL_COMMANDS | self.REJECTION_COMMANDS:
+                raise GARLException("Approval commands require an execution_id.", 400)
+            run = await self.durable_execution_service.start(
+                objective=latest,
+                conversation_id=conversation_id,
+                execution_context={
+                    "messages": [
+                        {"role": message.role, "content": message.content}
+                        for message in messages
+                    ]
+                },
+            )
+            state = CognitiveState(objective=run.objective)
+            plan = await self.pipeline.create_validated_plan(messages, state)
+            await self.durable_execution_service.persist_validated_plan(
+                run.execution_id,
+                plan,
+            )
+            execution_id = run.execution_id
+
+        decision = await self.durable_execution_service.prepare_resume(execution_id)
+        if decision.planning_required:
+            persisted_messages = self._persisted_messages(decision.run)
+            state = CognitiveState(objective=decision.run.objective)
+            plan = await self.pipeline.create_validated_plan(persisted_messages, state)
+            await self.durable_execution_service.persist_validated_plan(execution_id, plan)
+            decision = await self.durable_execution_service.prepare_resume(execution_id)
+
+        if decision.status is ExecutionRunStatus.WAITING_APPROVAL:
+            if normalized in self.APPROVAL_COMMANDS:
+                if approval_id is None:
+                    raise GARLException("Approval requires an approval_id.", 400)
+                try:
+                    result = await self.approval_service.approve_durable(
+                        execution_id,
+                        approval_id,
+                        decision.execution_state,
+                    )
+                except (KeyError, ValueError) as exc:
+                    raise GARLException(str(exc), 409) from exc
+                run = (await self.durable_execution_service.prepare_resume(execution_id)).run
+                return self._durable_response(
+                    str(result.output) if result.success else (result.error or "Execution failed."),
+                    run,
+                )
+            if normalized in self.REJECTION_COMMANDS:
+                if approval_id is None:
+                    raise GARLException("Rejection requires an approval_id.", 400)
+                try:
+                    response = await self.approval_service.reject_durable(execution_id, approval_id)
+                except (KeyError, ValueError) as exc:
+                    raise GARLException(str(exc), 409) from exc
+                run = (await self.durable_execution_service.prepare_resume(execution_id)).run
+                return self._durable_response(response, run)
+            return self._durable_response(
+                "An action is waiting for approval.",
+                decision.run,
+                decision.pending_approval.approval_id,
+            )
+
+        if decision.status is ExecutionRunStatus.RECOVERY_REQUIRED:
+            return self._durable_response("Execution requires recovery before it can continue.", decision.run)
+        if decision.may_execute:
+            state = CognitiveState(
+                objective=decision.run.objective,
+                execution=decision.execution_state,
+            )
+            response = await self.pipeline.run_persisted_step(
+                execution_id=execution_id,
+                step_id=decision.next_step_id,
+                messages=self._persisted_messages(decision.run),
+                state=state,
+            )
+            latest = await self.durable_execution_service.prepare_resume(execution_id)
+            return self._durable_response(
+                response.response,
+                latest.run,
+                latest.pending_approval.approval_id if latest.pending_approval else None,
+            )
+        return self._durable_response("Execution has no legal pending step.", decision.run)
+
+    @staticmethod
+    def _persisted_messages(run) -> list[ConversationMessage]:
+        return [
+            ConversationMessage(role=item["role"], content=item["content"])
+            for item in run.execution_context.get("messages", [])
+        ]
+
+    @staticmethod
+    def _durable_response(
+        response: str,
+        run,
+        pending_approval_id: str | None = None,
+    ) -> ChatResponse:
+        return ChatResponse(
+            response=response,
+            execution_id=run.execution_id,
+            execution_status=run.status.value,
+            pending_approval_id=pending_approval_id,
+        )
     # ======================================================
     # STATE
     # ======================================================
