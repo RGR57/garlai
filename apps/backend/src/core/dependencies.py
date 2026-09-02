@@ -51,6 +51,7 @@ from src.services.cognitive_pipeline import CognitivePipeline
 from src.services.plan_parser import PlanParser
 from src.services.prompt_builder import PromptBuilder
 from src.services.tool_catalog import ToolCatalog
+from src.services.capability_registry import CapabilityRegistry
 from src.services.permission_service import PermissionService
 from src.services.document_loader import (
     DocumentLoader,
@@ -261,6 +262,11 @@ def get_tool_catalog() -> ToolCatalog:
     return ToolCatalog(
         get_tool_manager()
     )
+
+
+@lru_cache
+def get_capability_registry() -> CapabilityRegistry:
+    return CapabilityRegistry(get_tool_manager())
 
 
 # ==========================================================
