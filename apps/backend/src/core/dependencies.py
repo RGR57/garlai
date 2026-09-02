@@ -33,6 +33,7 @@ from src.services.memory_extractor import (
 )
 from src.tools.registry import ToolRegistry
 from src.tools.tool_manager import ToolManager
+from src.tools.web_search_tool import WebSearchTool
 
 from src.services.agent_service import AgentService
 from src.services.durable_execution_service import DurableExecutionService
@@ -53,6 +54,8 @@ from src.services.prompt_builder import PromptBuilder
 from src.services.tool_catalog import ToolCatalog
 from src.services.capability_registry import CapabilityRegistry
 from src.services.capability_resolver import CapabilityResolver
+from src.services.brave_research_provider import BraveResearchProvider
+from src.services.research_provider import FakeResearchProvider, ResearchProvider
 from src.services.permission_service import PermissionService
 from src.services.document_loader import (
     DocumentLoader,
@@ -249,11 +252,20 @@ def get_knowledge_service() -> KnowledgeService:
 # ==========================================================
 
 @lru_cache
+def get_research_provider() -> ResearchProvider:
+    if settings.WEB_RESEARCH_FAKE_MODE:
+        return FakeResearchProvider()
+    if settings.WEB_RESEARCH_PROVIDER.strip().lower() != "brave":
+        raise ValueError("Unsupported web research provider.")
+    return BraveResearchProvider(api_key=settings.BRAVE_SEARCH_API_KEY)
+
+@lru_cache
 def get_tool_manager() -> ToolManager:
 
     manager = ToolManager()
 
     ToolRegistry.register_all(manager)
+    manager.register(WebSearchTool(get_research_provider()))
 
     return manager
 

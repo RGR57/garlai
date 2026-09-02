@@ -52,6 +52,11 @@ class PermissionService:
                 RiskLevel.LOW,
                 "Calculator operations are non-mutating.",
             )
+        elif tool_name == "web_search":
+            result = self._allow(
+                RiskLevel.LOW,
+                "Public web search is read-only.",
+            )
         else:
             # Unknown tools must never silently execute.
             result = self._deny(
@@ -69,7 +74,7 @@ class PermissionService:
         tool_name: str,
         arguments: dict[str, Any],
     ) -> ExecutionPolicy:
-        if tool_name == "calculator":
+        if tool_name in {"calculator", "web_search"}:
             return READ_ONLY_POLICY
         if tool_name == "filesystem" and arguments.get("action") in {
             "read_file",
