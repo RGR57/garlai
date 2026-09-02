@@ -24,6 +24,7 @@ class WebSearchTool(BaseTool):
             True,
             self.name,
             {
+                "trust": "untrusted_external_evidence",
                 "query": result.query,
                 "evidence": [
                     {
