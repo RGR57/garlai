@@ -14,6 +14,8 @@ class ResearchEvidence:
     url: str
     snippet: str
     source: str
+    query: str
+    retrieved_at: str
 
 
 @dataclass(frozen=True)
@@ -42,6 +44,8 @@ class FakeResearchProvider:
                     url="https://example.test/garl-market",
                     snippet="Deterministic evidence for offline GARL tests.",
                     source="fake",
+                    query=normalized_query,
+                    retrieved_at="2026-09-02T00:00:00+00:00",
                 ),
             )[:count],
         )

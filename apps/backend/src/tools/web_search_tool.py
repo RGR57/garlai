@@ -32,6 +32,8 @@ class WebSearchTool(BaseTool):
                         "url": item.url,
                         "snippet": item.snippet,
                         "source": item.source,
+                        "query": item.query,
+                        "retrieved_at": item.retrieved_at,
                     }
                     for item in result.evidence
                 ],

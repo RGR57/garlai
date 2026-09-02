@@ -4,6 +4,7 @@ import asyncio
 import json
 from collections.abc import Awaitable, Callable
 from typing import Any
+from datetime import datetime, timezone
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
@@ -58,6 +59,8 @@ class BraveResearchProvider:
                 url=str(item.get("url", "")),
                 snippet=str(item.get("description", "")),
                 source="brave",
+                query=normalized_query,
+                retrieved_at=datetime.now(timezone.utc).isoformat(),
             )
             for item in results[:count]
             if isinstance(item, dict) and item.get("url")
