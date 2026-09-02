@@ -46,6 +46,10 @@ from src.services.plan_scorer import (
 from src.services.plan_validator import (
     PlanValidator,
 )
+from src.services.capability_resolver import (
+    CapabilityResolver,
+    CapabilitySelection,
+)
 
 class CognitivePipeline:
 
@@ -62,6 +66,7 @@ class CognitivePipeline:
         candidate_plan_generator: CandidatePlanGenerator,
         plan_validator: PlanValidator,
         plan_scorer: PlanScorer,
+        capability_resolver: CapabilityResolver | None = None,
     ):
         self.planner = planner
         self.executor = executor
@@ -82,21 +87,61 @@ class CognitivePipeline:
         self.plan_scorer = (
             plan_scorer
         )
+        self.capability_resolver = capability_resolver
+
+    def resolve_capabilities(self, objective: str) -> CapabilitySelection | None:
+        if self.capability_resolver is None:
+            return None
+        return self.capability_resolver.resolve(objective)
+
+    def restore_capabilities(
+        self,
+        objective: str,
+        execution_context: dict,
+    ) -> CapabilitySelection | None:
+        if self.capability_resolver is None:
+            return None
+        snapshot = execution_context.get("capability_selection")
+        if isinstance(snapshot, dict) and isinstance(snapshot.get("capability_ids"), list):
+            return self.capability_resolver.resolve_persisted_ids(
+                tuple(snapshot["capability_ids"])
+            )
+        return self.resolve_capabilities(objective)
 
     async def create_validated_plan(
         self,
         messages: list[ConversationMessage],
         state: CognitiveState,
+        capability_selection: CapabilitySelection | None = None,
     ):
+        selection = capability_selection or self.resolve_capabilities(state.objective)
+        eligible_tool_names = (
+            selection.eligible_tool_names
+            if selection is not None
+            else None
+        )
+        capability_guidance = (
+            self.capability_resolver.registry.planner_description(
+                selection.capability_ids
+            )
+            if selection is not None and self.capability_resolver is not None
+            else ""
+        )
         candidates = await self.candidate_plan_generator.generate(
             messages,
             state,
             candidates=1,
+            eligible_tool_names=eligible_tool_names,
+            capability_guidance=capability_guidance,
         )
         valid = [
             candidate
             for candidate in candidates
-            if self.plan_validator.validate(candidate, state).valid
+            if self.plan_validator.validate(
+                candidate,
+                state,
+                eligible_tool_names=eligible_tool_names,
+            ).valid
         ]
         if not valid:
             raise RuntimeError("No generated plan passed GARL validation.")

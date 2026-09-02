@@ -59,3 +59,19 @@ def test_unavailable_capability_is_excluded_even_when_explicitly_proposed():
     assert selection.unavailable_reasons == {
         "software_engineering": ("filesystem", "terminal")
     }
+
+
+def test_selection_snapshot_is_json_safe_and_revalidates_registered_tools():
+    resolver = _resolver("web_search", "web_fetch", "filesystem", "terminal")
+    selection = resolver.resolve("research a source and build a prototype")
+
+    assert selection.to_execution_context() == {
+        "capability_ids": ["software_engineering", "web_research"],
+        "eligible_tool_names": ["filesystem", "terminal", "web_search", "web_fetch"],
+        "unavailable_reasons": {},
+        "rejected_capability_ids": [],
+    }
+    restored = resolver.resolve_persisted_ids(
+        tuple(selection.to_execution_context()["capability_ids"])
+    )
+    assert restored.eligible_tool_names == selection.eligible_tool_names

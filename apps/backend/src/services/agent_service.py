@@ -338,18 +338,28 @@ class AgentService:
         if execution_id is None:
             if normalized in self.APPROVAL_COMMANDS | self.REJECTION_COMMANDS:
                 raise GARLException("Approval commands require an execution_id.", 400)
+            capability_selection = self.pipeline.resolve_capabilities(latest)
+            execution_context = {
+                "messages": [
+                    {"role": message.role, "content": message.content}
+                    for message in messages
+                ]
+            }
+            if capability_selection is not None:
+                execution_context["capability_selection"] = (
+                    capability_selection.to_execution_context()
+                )
             run = await self.durable_execution_service.start(
                 objective=latest,
                 conversation_id=conversation_id,
-                execution_context={
-                    "messages": [
-                        {"role": message.role, "content": message.content}
-                        for message in messages
-                    ]
-                },
+                execution_context=execution_context,
             )
             state = CognitiveState(objective=run.objective)
-            plan = await self.pipeline.create_validated_plan(messages, state)
+            plan = await self.pipeline.create_validated_plan(
+                messages,
+                state,
+                capability_selection,
+            )
             await self.durable_execution_service.persist_validated_plan(
                 run.execution_id,
                 plan,
@@ -360,7 +370,15 @@ class AgentService:
         if decision.planning_required:
             persisted_messages = self._persisted_messages(decision.run)
             state = CognitiveState(objective=decision.run.objective)
-            plan = await self.pipeline.create_validated_plan(persisted_messages, state)
+            capability_selection = self.pipeline.restore_capabilities(
+                decision.run.objective,
+                decision.run.execution_context,
+            )
+            plan = await self.pipeline.create_validated_plan(
+                persisted_messages,
+                state,
+                capability_selection,
+            )
             await self.durable_execution_service.persist_validated_plan(execution_id, plan)
             decision = await self.durable_execution_service.prepare_resume(execution_id)
 

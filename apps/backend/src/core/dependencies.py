@@ -52,6 +52,7 @@ from src.services.plan_parser import PlanParser
 from src.services.prompt_builder import PromptBuilder
 from src.services.tool_catalog import ToolCatalog
 from src.services.capability_registry import CapabilityRegistry
+from src.services.capability_resolver import CapabilityResolver
 from src.services.permission_service import PermissionService
 from src.services.document_loader import (
     DocumentLoader,
@@ -269,6 +270,11 @@ def get_capability_registry() -> CapabilityRegistry:
     return CapabilityRegistry(get_tool_manager())
 
 
+@lru_cache
+def get_capability_resolver() -> CapabilityResolver:
+    return CapabilityResolver(get_capability_registry())
+
+
 # ==========================================================
 # Planner / Executor
 # ==========================================================
@@ -326,6 +332,7 @@ def get_cognitive_pipeline() -> CognitivePipeline:
         candidate_plan_generator=get_candidate_plan_generator(),
         plan_validator=get_plan_validator(),
         plan_scorer=get_plan_scorer(),
+        capability_resolver=get_capability_resolver(),
     )
 @lru_cache
 def get_reasoning_service() -> ReasoningService:

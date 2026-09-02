@@ -12,6 +12,17 @@ class CapabilitySelection:
     unavailable_reasons: dict[str, tuple[str, ...]]
     rejected_capability_ids: tuple[str, ...]
 
+    def to_execution_context(self) -> dict[str, object]:
+        return {
+            "capability_ids": list(self.capability_ids),
+            "eligible_tool_names": list(self.eligible_tool_names),
+            "unavailable_reasons": {
+                capability_id: list(missing_tools)
+                for capability_id, missing_tools in self.unavailable_reasons.items()
+            },
+            "rejected_capability_ids": list(self.rejected_capability_ids),
+        }
+
 
 class CapabilityResolver:
     """Resolve semantic work classes before concrete planning begins."""
@@ -63,3 +74,9 @@ class CapabilityResolver:
             unavailable_reasons=unavailable,
             rejected_capability_ids=tuple(rejected),
         )
+
+    def resolve_persisted_ids(
+        self,
+        capability_ids: tuple[Any, ...],
+    ) -> CapabilitySelection:
+        return self.resolve("", proposed_ids=capability_ids)

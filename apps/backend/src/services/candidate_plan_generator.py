@@ -20,6 +20,9 @@ class CandidatePlanGenerator:
         messages: list[ConversationMessage],
         state: CognitiveState,
         candidates: int = 2,
+        *,
+        eligible_tool_names: tuple[str, ...] | None = None,
+        capability_guidance: str = "",
     ) -> list[ExecutionPlan]:
 
         plans: list[ExecutionPlan] = []
@@ -41,6 +44,8 @@ class CandidatePlanGenerator:
             plan = await self.planner.create_plan(
                 messages,
                 cloned_state,
+                eligible_tool_names=eligible_tool_names,
+                capability_guidance=capability_guidance,
             )
 
             plans.append(
