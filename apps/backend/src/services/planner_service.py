@@ -32,10 +32,15 @@ class PlannerService:
         self,
         messages: list[ConversationMessage],
         state: CognitiveState,
+        *,
+        eligible_tool_names: tuple[str, ...] | None = None,
+        capability_guidance: str = "",
     ) -> ExecutionPlan:
 
         available_tools = (
-            self.tool_catalog.get_tool_descriptions()
+            self.tool_catalog.get_tool_descriptions(
+                eligible_tool_names
+            )
         )
 
         reviewer_feedback = (
@@ -68,6 +73,12 @@ class PlannerService:
 AVAILABLE TOOLS
 
 {available_tools}
+
+==================================================
+
+CAPABILITY GUIDANCE
+
+{capability_guidance if capability_guidance else "No capability-specific guidance."}
 
 ==================================================
 

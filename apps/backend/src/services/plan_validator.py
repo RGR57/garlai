@@ -39,6 +39,8 @@ class PlanValidator:
         self,
         plan: ExecutionPlan,
         state: CognitiveState,
+        *,
+        eligible_tool_names: tuple[str, ...] | None = None,
     ) -> ValidationResult:
 
         errors: list[str] = []
@@ -88,6 +90,7 @@ class PlanValidator:
         self._validate_tools(
             plan,
             errors,
+            eligible_tool_names,
         )
 
         self._validate_arguments(
@@ -234,7 +237,14 @@ class PlanValidator:
         self,
         plan: ExecutionPlan,
         errors: list[str],
+        eligible_tool_names: tuple[str, ...] | None,
     ) -> None:
+
+        eligible_names = (
+            set(eligible_tool_names)
+            if eligible_tool_names is not None
+            else None
+        )
 
         for step in plan.steps:
 
@@ -242,6 +252,16 @@ class PlanValidator:
                 continue
 
             tool_name = step.tool.strip()
+
+            if (
+                eligible_names is not None
+                and tool_name not in eligible_names
+            ):
+                errors.append(
+                    f"Step {step.id}: tool '{tool_name}' is outside "
+                    "the selected capabilities."
+                )
+                continue
 
             try:
 
