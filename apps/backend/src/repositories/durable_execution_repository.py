@@ -96,6 +96,9 @@ class DurableExecutionRepository(Protocol):
     async def complete_if_finished(self, execution_id: str) -> bool:
         """Mark a running execution complete only after every step succeeds."""
 
+    async def fail_if_finished(self, execution_id: str) -> bool:
+        """Mark exhausted work failed when its objective criteria are unmet."""
+
     async def request_approval(self, approval: ApprovalRequest) -> None:
         """Persist an immutable approval request for one exact operation."""
 

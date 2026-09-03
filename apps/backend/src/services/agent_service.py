@@ -426,8 +426,23 @@ class AgentService:
                 step_id=decision.next_step_id,
                 messages=self._persisted_messages(decision.run),
                 state=state,
+                finalize=False,
             )
             latest = await self.durable_execution_service.prepare_resume(execution_id)
+            evaluation = self.pipeline.evaluate_objective(latest.execution_state)
+            if evaluation is not None and not latest.may_execute:
+                if evaluation.complete:
+                    await self.durable_execution_service.complete_if_finished(execution_id)
+                    latest = await self.durable_execution_service.prepare_resume(execution_id)
+                else:
+                    await self.durable_execution_service.fail_if_finished(execution_id)
+                    latest = await self.durable_execution_service.prepare_resume(execution_id)
+                    response = ChatResponse(
+                        response=(
+                            "Objective incomplete: "
+                            + "; ".join(evaluation.gaps)
+                        )
+                    )
             return self._durable_response(
                 response.response,
                 latest.run,

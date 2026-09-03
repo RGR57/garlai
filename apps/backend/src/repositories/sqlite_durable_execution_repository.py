@@ -188,6 +188,9 @@ class SQLiteDurableExecutionRepository(DurableExecutionRepository):
             lambda: self._complete_if_finished(execution_id)
         )
 
+    async def fail_if_finished(self, execution_id: str) -> bool:
+        return await self._run(lambda: self._fail_if_finished(execution_id))
+
     async def request_approval(self, approval: ApprovalRequest) -> None:
         await self._run(lambda: self._request_approval(approval))
 
@@ -839,6 +842,29 @@ class SQLiteDurableExecutionRepository(DurableExecutionRepository):
                     execution_id,
                     ExecutionRunStatus.RUNNING.value,
                 ),
+            ).rowcount
+            connection.commit()
+            return updated == 1
+        except Exception:
+            connection.rollback()
+            raise
+        finally:
+            connection.close()
+
+    def _fail_if_finished(self, execution_id: str) -> bool:
+        connection = self._connect()
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            incomplete = connection.execute(
+                "SELECT 1 FROM execution_steps WHERE execution_id = ? AND status != ? LIMIT 1",
+                (execution_id, DurableStepStatus.COMPLETED.value),
+            ).fetchone()
+            if incomplete is not None:
+                connection.commit()
+                return False
+            updated = connection.execute(
+                "UPDATE execution_runs SET status = ?, updated_at = ? WHERE execution_id = ? AND status = ?",
+                (ExecutionRunStatus.FAILED.value, _now(), execution_id, ExecutionRunStatus.RUNNING.value),
             ).rowcount
             connection.commit()
             return updated == 1

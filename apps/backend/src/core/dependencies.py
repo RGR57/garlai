@@ -56,6 +56,7 @@ from src.services.capability_registry import CapabilityRegistry
 from src.services.capability_resolver import CapabilityResolver
 from src.services.brave_research_provider import BraveResearchProvider
 from src.services.research_provider import FakeResearchProvider, ResearchProvider
+from src.services.objective_evaluator import ObjectiveEvaluator
 from src.services.permission_service import PermissionService
 from src.services.document_loader import (
     DocumentLoader,
@@ -287,6 +288,11 @@ def get_capability_resolver() -> CapabilityResolver:
     return CapabilityResolver(get_capability_registry())
 
 
+@lru_cache
+def get_objective_evaluator() -> ObjectiveEvaluator:
+    return ObjectiveEvaluator()
+
+
 # ==========================================================
 # Planner / Executor
 # ==========================================================
@@ -345,6 +351,7 @@ def get_cognitive_pipeline() -> CognitivePipeline:
         plan_validator=get_plan_validator(),
         plan_scorer=get_plan_scorer(),
         capability_resolver=get_capability_resolver(),
+        objective_evaluator=get_objective_evaluator(),
     )
 @lru_cache
 def get_reasoning_service() -> ReasoningService:

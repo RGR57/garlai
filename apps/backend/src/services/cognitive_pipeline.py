@@ -50,6 +50,7 @@ from src.services.capability_resolver import (
     CapabilityResolver,
     CapabilitySelection,
 )
+from src.services.objective_evaluator import ObjectiveEvaluation, ObjectiveEvaluator
 
 class CognitivePipeline:
 
@@ -67,6 +68,7 @@ class CognitivePipeline:
         plan_validator: PlanValidator,
         plan_scorer: PlanScorer,
         capability_resolver: CapabilityResolver | None = None,
+        objective_evaluator: ObjectiveEvaluator | None = None,
     ):
         self.planner = planner
         self.executor = executor
@@ -88,6 +90,12 @@ class CognitivePipeline:
             plan_scorer
         )
         self.capability_resolver = capability_resolver
+        self.objective_evaluator = objective_evaluator
+
+    def evaluate_objective(self, state: CognitiveState) -> ObjectiveEvaluation | None:
+        if self.objective_evaluator is None:
+            return None
+        return self.objective_evaluator.evaluate(state.objective, state.execution, state.artifacts)
 
     def resolve_capabilities(self, objective: str) -> CapabilitySelection | None:
         if self.capability_resolver is None:
@@ -154,14 +162,24 @@ class CognitivePipeline:
         step_id: int,
         messages: list[ConversationMessage],
         state: CognitiveState,
+        finalize: bool = True,
     ) -> ChatResponse:
         """Execute one recovered cursor without regenerating its validated plan."""
-        result = await self.executor.execute_ready_step(
-            execution_id,
-            step_id,
-            messages,
-            state.execution,
-        )
+        if finalize:
+            result = await self.executor.execute_ready_step(
+                execution_id,
+                step_id,
+                messages,
+                state.execution,
+            )
+        else:
+            result = await self.executor.execute_ready_step(
+                execution_id,
+                step_id,
+                messages,
+                state.execution,
+                finalize=False,
+            )
         state.execution.current_step = step_id
         state.execution.record(result)
         if result.success:

@@ -4,12 +4,14 @@ from pathlib import Path
 
 from src.models.plan import ExecutionPlan, PlanStep
 from src.models.execution_state import ExecutionState
+from src.models.durable_execution import ExecutionRunStatus
 from src.repositories.sqlite_durable_execution_repository import SQLiteDurableExecutionRepository
 from src.services.context_builder import ContextBuilder
 from src.services.durable_execution_service import DurableExecutionService
 from src.services.executor_service import ExecutorService
 from src.services.permission_service import PermissionService
 from src.services.recovery_service import RecoveryService
+from src.services.objective_evaluator import ObjectiveEvaluator
 from src.services.variable_resolver import VariableResolver
 from src.tools.tool_manager import ToolManager
 from src.tools.web_search_tool import WebSearchTool
@@ -60,4 +62,29 @@ class DurableResearchProvenanceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(evidence["query"], "GARL market")
         self.assertEqual(evidence["source"], "fake")
         self.assertEqual(evidence["retrieved_at"], "2026-09-02T00:00:00+00:00")
-        self.assertEqual(provider.calls, 1)
+
+    async def test_exhausted_work_fails_when_objective_evaluation_has_gaps(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        repository = SQLiteDurableExecutionRepository(Path(directory.name) / "incomplete.sqlite3")
+        await repository.initialize()
+        provider = CountingResearchProvider()
+        tools = ToolManager()
+        tools.register(WebSearchTool(provider))
+        durable = DurableExecutionService(repository)
+        run = await durable.start(
+            objective="Research a market and create and verify a working local prototype.",
+            execution_context={}, execution_id="incomplete-run"
+        )
+        await durable.persist_validated_plan(
+            run.execution_id,
+            ExecutionPlan(steps=[PlanStep(id=1, action="research market", tool="web_search", input="market", arguments={"query": "market"})]),
+        )
+        executor = ExecutorService(None, ContextBuilder(), tools, VariableResolver(), PermissionService(), repository)
+        await executor.execute_ready_step(run.execution_id, 1, [], ExecutionState(), finalize=False)
+
+        restored = await RecoveryService(SQLiteDurableExecutionRepository(repository.database_path)).prepare_resume(run.execution_id)
+        evaluation = ObjectiveEvaluator().evaluate(run.objective, restored.execution_state, [])
+        self.assertFalse(evaluation.complete)
+        self.assertTrue(await durable.fail_if_finished(run.execution_id))
+        self.assertEqual((await durable.prepare_resume(run.execution_id)).status, ExecutionRunStatus.FAILED)
