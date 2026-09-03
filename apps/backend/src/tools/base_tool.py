@@ -1,7 +1,26 @@
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from typing import Any
 
 from src.models.tool_result import ToolResult
+
+
+@dataclass(frozen=True)
+class ToolInvocationContext:
+    """Execution-owned context that is never supplied by planner arguments."""
+
+    execution_id: str | None
+    step_id: int | None
+    operation_id: str | None
+    approved_payload_hash: str | None = None
+
+
+@dataclass(frozen=True)
+class ToolPreflight:
+    """A provider may decline a consequential dispatch before it is claimed."""
+
+    ready: bool
+    reason: str | None = None
 
 
 class BaseTool(ABC):
@@ -55,3 +74,19 @@ class BaseTool(ABC):
         **kwargs,
     ) -> ToolResult:
         ...
+
+    async def execute_with_context(
+        self,
+        arguments: dict[str, Any],
+        invocation: ToolInvocationContext,
+    ) -> ToolResult:
+        """Backward-compatible context-aware execution hook."""
+        return await self.execute(**arguments)
+
+    async def preflight(
+        self,
+        arguments: dict[str, Any],
+        invocation: ToolInvocationContext,
+    ) -> ToolPreflight:
+        """Legacy tools have no pre-dispatch reconciliation work."""
+        return ToolPreflight(ready=True)

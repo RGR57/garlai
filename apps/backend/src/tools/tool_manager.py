@@ -1,6 +1,7 @@
 from typing import Any
 
-from src.tools.base_tool import BaseTool
+from src.models.tool_result import ToolResult
+from src.tools.base_tool import BaseTool, ToolInvocationContext, ToolPreflight
 
 
 class ToolManager:
@@ -164,3 +165,25 @@ class ToolManager:
                 )
 
         return True, None
+
+    async def execute(
+        self,
+        name: str,
+        arguments: dict[str, Any],
+        invocation: ToolInvocationContext,
+    ) -> ToolResult:
+        tool = self.get(name)
+        if tool is None:
+            raise KeyError(f"Tool '{name}' is not registered.")
+        return await tool.execute_with_context(arguments, invocation)
+
+    async def preflight(
+        self,
+        name: str,
+        arguments: dict[str, Any],
+        invocation: ToolInvocationContext,
+    ) -> ToolPreflight:
+        tool = self.get(name)
+        if tool is None:
+            raise KeyError(f"Tool '{name}' is not registered.")
+        return await tool.preflight(arguments, invocation)
