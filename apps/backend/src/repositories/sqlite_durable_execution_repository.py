@@ -72,6 +72,14 @@ class SQLiteDurableExecutionRepository(DurableExecutionRepository):
     async def load(self, execution_id: str) -> ExecutionRun:
         return await self._run(lambda: self._load(execution_id))
 
+    async def patch_execution_context(
+        self,
+        execution_id: str,
+        patch: dict,
+    ) -> ExecutionRun:
+        await self._run(lambda: self._patch_execution_context(execution_id, patch))
+        return await self.load(execution_id)
+
     async def list_recoverable(self) -> list[ExecutionRun]:
         return await self._run(self._list_recoverable)
 
@@ -111,6 +119,7 @@ class SQLiteDurableExecutionRepository(DurableExecutionRepository):
         result: dict | None = None,
         error: dict | None = None,
         artifact: dict | None = None,
+        execution_context_patch: dict | None = None,
     ) -> None:
         await self._run(
             lambda: self._record_operation_outcome(
@@ -119,6 +128,7 @@ class SQLiteDurableExecutionRepository(DurableExecutionRepository):
                 result=result,
                 error=error,
                 artifact=artifact,
+                execution_context_patch=execution_context_patch,
             )
         )
 
@@ -172,6 +182,7 @@ class SQLiteDurableExecutionRepository(DurableExecutionRepository):
         *,
         result: dict | None = None,
         error: dict | None = None,
+        execution_context_patch: dict | None = None,
     ) -> None:
         await self._run(
             lambda: self._record_read_only_outcome(
@@ -180,6 +191,7 @@ class SQLiteDurableExecutionRepository(DurableExecutionRepository):
                 status,
                 result=result,
                 error=error,
+                execution_context_patch=execution_context_patch,
             )
         )
 
@@ -365,6 +377,42 @@ class SQLiteDurableExecutionRepository(DurableExecutionRepository):
             raise
         finally:
             connection.close()
+
+    def _patch_execution_context(self, execution_id: str, patch: dict) -> None:
+        connection = self._connect()
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            self._merge_execution_context_patch(connection, execution_id, patch)
+            connection.commit()
+        except Exception:
+            connection.rollback()
+            raise
+        finally:
+            connection.close()
+
+    @staticmethod
+    def _merge_execution_context_patch(
+        connection: sqlite3.Connection,
+        execution_id: str,
+        patch: dict,
+    ) -> None:
+        if not isinstance(patch, dict):
+            raise ValueError("Execution context patch must be a JSON object.")
+        _encode_json(patch)
+        row = connection.execute(
+            "SELECT status, execution_context_json FROM execution_runs WHERE execution_id = ?",
+            (execution_id,),
+        ).fetchone()
+        if row is None:
+            raise KeyError(f"Unknown durable execution '{execution_id}'.")
+        if ExecutionRunStatus(row["status"]).is_terminal:
+            raise ValueError("Cannot patch a terminal durable execution.")
+        context = _decode_mapping(row["execution_context_json"], "execution context")
+        merged = _deep_merge_json_mappings(context, patch)
+        connection.execute(
+            "UPDATE execution_runs SET execution_context_json = ?, updated_at = ? WHERE execution_id = ?",
+            (_encode_json(merged), _now(), execution_id),
+        )
 
     def _insert_step(
         self,
@@ -600,6 +648,7 @@ class SQLiteDurableExecutionRepository(DurableExecutionRepository):
         result: dict | None,
         error: dict | None,
         artifact: dict | None,
+        execution_context_patch: dict | None,
     ) -> None:
         if not claim.granted:
             raise ValueError("Only a granted operation claim may record an outcome.")
@@ -680,6 +729,12 @@ class SQLiteDurableExecutionRepository(DurableExecutionRepository):
                     DurableStepStatus.EXECUTING.value,
                 ),
             )
+            if execution_context_patch is not None:
+                self._merge_execution_context_patch(
+                    connection,
+                    claim.execution_id,
+                    execution_context_patch,
+                )
             if status is DurableStepStatus.COMPLETED:
                 self._checkpoint_completed_step(
                     connection,
@@ -971,6 +1026,7 @@ class SQLiteDurableExecutionRepository(DurableExecutionRepository):
         *,
         result: dict | None,
         error: dict | None,
+        execution_context_patch: dict | None,
     ) -> None:
         if status not in {
             DurableStepStatus.COMPLETED,
@@ -998,6 +1054,12 @@ class SQLiteDurableExecutionRepository(DurableExecutionRepository):
             ).rowcount
             if updated != 1:
                 raise ValueError("Read-only step is not awaiting an outcome.")
+            if execution_context_patch is not None:
+                self._merge_execution_context_patch(
+                    connection,
+                    execution_id,
+                    execution_context_patch,
+                )
             if status is DurableStepStatus.COMPLETED:
                 self._checkpoint_completed_step(
                     connection,
@@ -1404,6 +1466,17 @@ def _encode_json(value: object) -> str:
         )
     except (TypeError, ValueError) as exc:
         raise ValueError("Durable values must be constrained JSON") from exc
+
+
+def _deep_merge_json_mappings(existing: dict, patch: dict) -> dict:
+    merged = dict(existing)
+    for key, value in patch.items():
+        current = merged.get(key)
+        if isinstance(current, dict) and isinstance(value, dict):
+            merged[key] = _deep_merge_json_mappings(current, value)
+        else:
+            merged[key] = value
+    return merged
 
 
 def _approval_payload(approval: ApprovalRequest) -> dict:

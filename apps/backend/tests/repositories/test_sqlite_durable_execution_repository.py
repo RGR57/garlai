@@ -1,6 +1,7 @@
 import unittest
 
 from src.models.durable_execution import (
+    canonical_payload_hash,
     DurableStateCorruptionError,
     DurableStep,
     DurableStepStatus,
@@ -69,6 +70,124 @@ class SQLiteDurableExecutionRepositoryTests(unittest.IsolatedAsyncioTestCase):
 
         with self.assertRaises(DurableStateCorruptionError):
             await repository.load("run-corrupt")
+
+    async def test_execution_context_patch_deep_merges_and_survives_fresh_repository(self):
+        path = self._tmp_path("context-patch.sqlite3")
+        first = SQLiteDurableExecutionRepository(path)
+        await first.initialize()
+        await first.create_planning_run(
+            ExecutionRun(
+                execution_id="run-context",
+                objective="inspect marketplace",
+                execution_context={
+                    "source": "chat",
+                    "browser": {"last_verified_url": "https://market.example/pricing"},
+                },
+            )
+        )
+
+        await first.patch_execution_context(
+            "run-context",
+            {
+                "browser": {
+                    "session_id": "browser-run-context",
+                    "latest_observation": {"observation_id": "obs-1"},
+                }
+            },
+        )
+
+        loaded = await SQLiteDurableExecutionRepository(path).load("run-context")
+
+        self.assertEqual(
+            loaded.execution_context,
+            {
+                "source": "chat",
+                "browser": {
+                    "last_verified_url": "https://market.example/pricing",
+                    "session_id": "browser-run-context",
+                    "latest_observation": {"observation_id": "obs-1"},
+                },
+            },
+        )
+
+    async def test_read_only_outcome_commits_browser_context_with_the_completed_step(self):
+        path = self._tmp_path("context-outcome.sqlite3")
+        repository = SQLiteDurableExecutionRepository(path)
+        await repository.initialize()
+        await repository.create_planning_run(
+            ExecutionRun(execution_id="run-outcome", objective="observe pricing")
+        )
+        await repository.persist_validated_plan(
+            "run-outcome",
+            [
+                DurableStep(
+                    step_id=1,
+                    ordinal=0,
+                    action="observe pricing",
+                    tool="browser_observe",
+                    arguments={},
+                )
+            ],
+        )
+        self.assertTrue(await repository.claim_read_only_step("run-outcome", 1))
+
+        await repository.record_read_only_outcome(
+            "run-outcome",
+            1,
+            DurableStepStatus.COMPLETED,
+            result={"output": {"observation_id": "obs-1"}},
+            execution_context_patch={
+                "browser": {"latest_observation": {"observation_id": "obs-1"}}
+            },
+        )
+
+        loaded = await SQLiteDurableExecutionRepository(path).load("run-outcome")
+
+        self.assertEqual(loaded.steps[0].status, DurableStepStatus.COMPLETED)
+        self.assertEqual(
+            loaded.execution_context["browser"]["latest_observation"],
+            {"observation_id": "obs-1"},
+        )
+
+    async def test_operation_outcome_commits_browser_context_with_the_completed_step(self):
+        path = self._tmp_path("operation-context-outcome.sqlite3")
+        repository = SQLiteDurableExecutionRepository(path)
+        await repository.initialize()
+        await repository.create_planning_run(
+            ExecutionRun(execution_id="run-operation", objective="select plan")
+        )
+        arguments = {"target": "pro"}
+        payload_hash = canonical_payload_hash("browser_select", "choose plan", arguments)
+        await repository.persist_validated_plan(
+            "run-operation",
+            [
+                DurableStep(
+                    step_id=1,
+                    ordinal=0,
+                    action="choose plan",
+                    tool="browser_select",
+                    arguments=arguments,
+                    operation_id="operation-1",
+                    payload_hash=payload_hash,
+                )
+            ],
+        )
+        claim = await repository.claim_operation(
+            "run-operation", 1, "operation-1", payload_hash
+        )
+        self.assertTrue(claim.granted)
+
+        await repository.record_operation_outcome(
+            claim,
+            DurableStepStatus.COMPLETED,
+            result={"output": "selected"},
+            execution_context_patch={"browser": {"selected_plan": "pro"}},
+        )
+
+        loaded = await SQLiteDurableExecutionRepository(path).load("run-operation")
+
+        self.assertEqual(loaded.steps[0].status, DurableStepStatus.COMPLETED)
+        self.assertEqual(loaded.execution_context["browser"]["selected_plan"], "pro")
 
     def _tmp_path(self, filename: str):
         import tempfile

@@ -31,6 +31,13 @@ class DurableExecutionRepository(Protocol):
     async def load(self, execution_id: str) -> ExecutionRun:
         """Load and validate one durable execution aggregate."""
 
+    async def patch_execution_context(
+        self,
+        execution_id: str,
+        patch: dict,
+    ) -> ExecutionRun:
+        """Deep-merge constrained execution-scoped facts for a nonterminal run."""
+
     async def list_recoverable(self) -> list[ExecutionRun]:
         """List runs that may be inspected by an explicit recovery request."""
 
@@ -54,6 +61,7 @@ class DurableExecutionRepository(Protocol):
         result: dict | None = None,
         error: dict | None = None,
         artifact: dict | None = None,
+        execution_context_patch: dict | None = None,
     ) -> None:
         """Persist one proven terminal outcome for an already claimed operation."""
 
@@ -90,6 +98,7 @@ class DurableExecutionRepository(Protocol):
         *,
         result: dict | None = None,
         error: dict | None = None,
+        execution_context_patch: dict | None = None,
     ) -> None:
         """Persist the confirmed outcome of a claimed read-only step."""
 
