@@ -54,6 +54,12 @@ class DurableExecutionService:
     async def prepare_resume(self, execution_id: str) -> RecoveryDecision:
         return await self.recovery_service.prepare_resume(execution_id)
 
+    async def complete_if_finished(self, execution_id: str) -> bool:
+        return await self.repository.complete_if_finished(execution_id)
+
+    async def fail_if_finished(self, execution_id: str) -> bool:
+        return await self.repository.fail_if_finished(execution_id)
+
     @staticmethod
     def _to_durable_step(step, ordinal: int) -> DurableStep:
         operation_id = str(uuid.uuid4()) if step.tool is not None else None

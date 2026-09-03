@@ -80,6 +80,7 @@ class ExecutorService:
         messages: list[ConversationMessage],
         state: ExecutionState,
         approved_payload_hash: str | None = None,
+        finalize: bool = True,
     ) -> StepResult:
         if self.durable_repository is None:
             raise RuntimeError("Durable execution repository is not configured.")
@@ -146,7 +147,7 @@ class ExecutorService:
                 if not result.success
                 else None,
             )
-            if result.success:
+            if result.success and finalize:
                 await self.durable_repository.complete_if_finished(execution_id)
             return result
 
@@ -277,7 +278,7 @@ class ExecutorService:
                 ),
                 error=error_value,
             )
-            if tool_result.success:
+            if tool_result.success and finalize:
                 await self.durable_repository.complete_if_finished(execution_id)
             return StepResult(
                 step_id=step_id,
@@ -354,7 +355,8 @@ class ExecutorService:
                 "metadata": tool_result.metadata or {},
             },
         )
-        await self.durable_repository.complete_if_finished(execution_id)
+        if finalize:
+            await self.durable_repository.complete_if_finished(execution_id)
         return StepResult(
             step_id=step_id,
             success=True,

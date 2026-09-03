@@ -1,4 +1,5 @@
 import json
+from collections.abc import Iterable
 
 from src.tools.tool_manager import ToolManager
 
@@ -17,15 +18,29 @@ class ToolCatalog:
             for tool in self.tool_manager.list_tools()
         ]
 
-    def get_tool_definitions(self) -> list[dict]:
+    def get_tool_definitions(
+        self,
+        eligible_tool_names: Iterable[str] | None = None,
+    ) -> list[dict]:
         """
         Return machine-readable definitions for
         every registered GARL tool.
         """
 
+        eligible_names = (
+            set(eligible_tool_names)
+            if eligible_tool_names is not None
+            else None
+        )
         definitions = []
 
         for tool in self.tool_manager.list_tools():
+
+            if (
+                eligible_names is not None
+                and tool.name not in eligible_names
+            ):
+                continue
 
             definitions.append(
                 {
@@ -37,12 +52,15 @@ class ToolCatalog:
 
         return definitions
 
-    def get_tool_descriptions(self) -> str:
+    def get_tool_descriptions(
+        self,
+        eligible_tool_names: Iterable[str] | None = None,
+    ) -> str:
         """
         Return planner-friendly tool definitions.
         """
 
-        definitions = self.get_tool_definitions()
+        definitions = self.get_tool_definitions(eligible_tool_names)
 
         if not definitions:
             return "No tools are currently available."

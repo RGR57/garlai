@@ -15,6 +15,9 @@ class Settings(BaseSettings):
     LLM_MAX_RETRIES: int = 1
     LLM_FAKE_MODE: bool = False
     GROQ_API_KEY: str = ""
+    WEB_RESEARCH_PROVIDER: str = "brave"
+    WEB_RESEARCH_FAKE_MODE: bool = False
+    BRAVE_SEARCH_API_KEY: str = ""
     DURABLE_DB_PATH: str = Field(
         default="runtime/garl-durable.sqlite3",
         validation_alias="GARL_DURABLE_DB_PATH",

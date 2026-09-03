@@ -33,6 +33,7 @@ from src.services.memory_extractor import (
 )
 from src.tools.registry import ToolRegistry
 from src.tools.tool_manager import ToolManager
+from src.tools.web_search_tool import WebSearchTool
 
 from src.services.agent_service import AgentService
 from src.services.durable_execution_service import DurableExecutionService
@@ -51,6 +52,11 @@ from src.services.cognitive_pipeline import CognitivePipeline
 from src.services.plan_parser import PlanParser
 from src.services.prompt_builder import PromptBuilder
 from src.services.tool_catalog import ToolCatalog
+from src.services.capability_registry import CapabilityRegistry
+from src.services.capability_resolver import CapabilityResolver
+from src.services.brave_research_provider import BraveResearchProvider
+from src.services.research_provider import FakeResearchProvider, ResearchProvider
+from src.services.objective_evaluator import ObjectiveEvaluator
 from src.services.permission_service import PermissionService
 from src.services.document_loader import (
     DocumentLoader,
@@ -247,11 +253,20 @@ def get_knowledge_service() -> KnowledgeService:
 # ==========================================================
 
 @lru_cache
+def get_research_provider() -> ResearchProvider:
+    if settings.WEB_RESEARCH_FAKE_MODE:
+        return FakeResearchProvider()
+    if settings.WEB_RESEARCH_PROVIDER.strip().lower() != "brave":
+        raise ValueError("Unsupported web research provider.")
+    return BraveResearchProvider(api_key=settings.BRAVE_SEARCH_API_KEY)
+
+@lru_cache
 def get_tool_manager() -> ToolManager:
 
     manager = ToolManager()
 
     ToolRegistry.register_all(manager)
+    manager.register(WebSearchTool(get_research_provider()))
 
     return manager
 
@@ -261,6 +276,21 @@ def get_tool_catalog() -> ToolCatalog:
     return ToolCatalog(
         get_tool_manager()
     )
+
+
+@lru_cache
+def get_capability_registry() -> CapabilityRegistry:
+    return CapabilityRegistry(get_tool_manager())
+
+
+@lru_cache
+def get_capability_resolver() -> CapabilityResolver:
+    return CapabilityResolver(get_capability_registry())
+
+
+@lru_cache
+def get_objective_evaluator() -> ObjectiveEvaluator:
+    return ObjectiveEvaluator()
 
 
 # ==========================================================
@@ -320,6 +350,8 @@ def get_cognitive_pipeline() -> CognitivePipeline:
         candidate_plan_generator=get_candidate_plan_generator(),
         plan_validator=get_plan_validator(),
         plan_scorer=get_plan_scorer(),
+        capability_resolver=get_capability_resolver(),
+        objective_evaluator=get_objective_evaluator(),
     )
 @lru_cache
 def get_reasoning_service() -> ReasoningService:
