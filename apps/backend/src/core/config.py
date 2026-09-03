@@ -18,6 +18,9 @@ class Settings(BaseSettings):
     WEB_RESEARCH_PROVIDER: str = "brave"
     WEB_RESEARCH_FAKE_MODE: bool = False
     BRAVE_SEARCH_API_KEY: str = ""
+    BROWSER_PROVIDER: str = "playwright"
+    BROWSER_FAKE_MODE: bool = False
+    BROWSER_HEADLESS: bool = True
     DURABLE_DB_PATH: str = Field(
         default="runtime/garl-durable.sqlite3",
         validation_alias="GARL_DURABLE_DB_PATH",
