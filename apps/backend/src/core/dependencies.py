@@ -56,6 +56,11 @@ from src.services.capability_registry import CapabilityRegistry
 from src.services.capability_resolver import CapabilityResolver
 from src.services.brave_research_provider import BraveResearchProvider
 from src.services.research_provider import FakeResearchProvider, ResearchProvider
+from src.services.browser_provider import BrowserProvider
+from src.services.browser_session_service import BrowserSessionService
+from src.services.fake_browser_provider import FakeBrowserProvider
+from src.services.navigation_policy import ProductionNavigationPolicy
+from src.services.playwright_browser_provider import PlaywrightBrowserProvider
 from src.services.objective_evaluator import ObjectiveEvaluator
 from src.services.permission_service import PermissionService
 from src.services.document_loader import (
@@ -260,6 +265,24 @@ def get_research_provider() -> ResearchProvider:
         raise ValueError("Unsupported web research provider.")
     return BraveResearchProvider(api_key=settings.BRAVE_SEARCH_API_KEY)
 
+
+@lru_cache
+def get_browser_provider() -> BrowserProvider:
+    if settings.BROWSER_FAKE_MODE:
+        return FakeBrowserProvider({})
+    if settings.BROWSER_PROVIDER.strip().lower() != "playwright":
+        raise ValueError("Unsupported browser provider.")
+    return PlaywrightBrowserProvider(headless=settings.BROWSER_HEADLESS)
+
+
+@lru_cache
+def get_browser_session_service() -> BrowserSessionService:
+    return BrowserSessionService(
+        get_durable_execution_repository(),
+        get_browser_provider(),
+        ProductionNavigationPolicy(),
+    )
+
 @lru_cache
 def get_tool_manager() -> ToolManager:
 
@@ -267,6 +290,7 @@ def get_tool_manager() -> ToolManager:
 
     ToolRegistry.register_all(manager)
     manager.register(WebSearchTool(get_research_provider()))
+    ToolRegistry.register_browser_tools(manager, get_browser_session_service())
 
     return manager
 

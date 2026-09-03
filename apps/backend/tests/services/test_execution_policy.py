@@ -39,6 +39,14 @@ class ExecutionPolicyTests(unittest.TestCase):
         self.assertTrue(result.execution_policy.is_consequential)
         self.assertFalse(result.execution_policy.retry_known_failure)
 
+    def test_browser_navigation_and_observation_are_allowed_read_oriented_actions(self):
+        for tool_name in ("browser_navigate", "browser_observe"):
+            result = self.permission.evaluate(tool_name, {})
+
+            self.assertEqual(result.decision, PermissionDecision.ALLOW)
+            self.assertFalse(result.execution_policy.is_consequential)
+            self.assertTrue(result.execution_policy.retry_known_failure)
+
 
 if __name__ == "__main__":
     unittest.main()

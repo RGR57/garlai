@@ -57,6 +57,11 @@ class PermissionService:
                 RiskLevel.LOW,
                 "Public web search is read-only.",
             )
+        elif tool_name in {"browser_navigate", "browser_observe"}:
+            result = self._allow(
+                RiskLevel.LOW,
+                "Browser navigation and observation are read-oriented under navigation policy.",
+            )
         else:
             # Unknown tools must never silently execute.
             result = self._deny(
@@ -74,7 +79,7 @@ class PermissionService:
         tool_name: str,
         arguments: dict[str, Any],
     ) -> ExecutionPolicy:
-        if tool_name in {"calculator", "web_search"}:
+        if tool_name in {"calculator", "web_search", "browser_navigate", "browser_observe"}:
             return READ_ONLY_POLICY
         if tool_name == "filesystem" and arguments.get("action") in {
             "read_file",
