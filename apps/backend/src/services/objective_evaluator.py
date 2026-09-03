@@ -67,4 +67,13 @@ class ObjectiveEvaluator:
 
     @staticmethod
     def _verification(state: ExecutionState) -> list[str]:
-        return [str(result.output) for result in state.history if result.success and result.tool == "terminal" and result.output is not None]
+        return [
+            str(result.output)
+            for result in state.history
+            if result.success
+            and result.output is not None
+            and (
+                result.tool == "terminal"
+                or "verify" in (result.action or "").lower()
+            )
+        ]

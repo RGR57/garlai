@@ -46,6 +46,7 @@ from src.services.plan_scorer import (
 from src.services.plan_validator import (
     PlanValidator,
 )
+from src.models.execution_state import ExecutionState
 from src.services.capability_resolver import (
     CapabilityResolver,
     CapabilitySelection,
@@ -93,9 +94,19 @@ class CognitivePipeline:
         self.objective_evaluator = objective_evaluator
 
     def evaluate_objective(self, state: CognitiveState) -> ObjectiveEvaluation | None:
+        return self.evaluate_execution_objective(
+            state.objective,
+            state.execution,
+        )
+
+    def evaluate_execution_objective(
+        self,
+        objective: str,
+        execution_state: ExecutionState,
+    ) -> ObjectiveEvaluation | None:
         if self.objective_evaluator is None:
             return None
-        return self.objective_evaluator.evaluate(state.objective, state.execution, state.artifacts)
+        return self.objective_evaluator.evaluate(objective, execution_state, [])
 
     def resolve_capabilities(self, objective: str) -> CapabilitySelection | None:
         if self.capability_resolver is None:

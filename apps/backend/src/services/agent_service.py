@@ -429,7 +429,10 @@ class AgentService:
                 finalize=False,
             )
             latest = await self.durable_execution_service.prepare_resume(execution_id)
-            evaluation = self.pipeline.evaluate_objective(latest.execution_state)
+            evaluation = self.pipeline.evaluate_execution_objective(
+                latest.run.objective,
+                latest.execution_state,
+            )
             if evaluation is not None and not latest.may_execute:
                 if evaluation.complete:
                     await self.durable_execution_service.complete_if_finished(execution_id)
