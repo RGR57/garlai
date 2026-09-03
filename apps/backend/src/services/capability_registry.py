@@ -7,6 +7,17 @@ class CapabilityRegistry:
 
     _CAPABILITIES = (
         Capability(
+            capability_id="calculation",
+            name="Calculation",
+            description="Evaluate arithmetic expressions using the calculator tool.",
+            tags=("calculate", "calculation", "arithmetic", "math"),
+            required_tools=("calculator",),
+            optional_tools=(),
+            input_classes=("expression",),
+            output_classes=("calculation_result",),
+            planner_guidance="Evaluate arithmetic with the calculator tool.",
+        ),
+        Capability(
             capability_id="software_engineering",
             name="Software engineering",
             description="Inspect, change, test, and verify software using existing tools.",

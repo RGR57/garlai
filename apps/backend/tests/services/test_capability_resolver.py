@@ -75,3 +75,12 @@ def test_selection_snapshot_is_json_safe_and_revalidates_registered_tools():
         tuple(selection.to_execution_context()["capability_ids"])
     )
     assert restored.eligible_tool_names == selection.eligible_tool_names
+
+
+def test_calculation_objective_exposes_only_calculator_tool():
+    selection = _resolver("calculator", "filesystem", "terminal").resolve(
+        "Calculate 2 + 2."
+    )
+
+    assert selection.capability_ids == ("calculation",)
+    assert selection.eligible_tool_names == ("calculator",)
