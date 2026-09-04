@@ -41,6 +41,14 @@ class DurableExecutionRepository(Protocol):
     async def list_recoverable(self) -> list[ExecutionRun]:
         """List runs that may be inspected by an explicit recovery request."""
 
+    async def record_reconciliation(
+        self,
+        execution_id: str,
+        execution_context_patch: dict,
+        recovery_reason: str | None = None,
+    ) -> None:
+        """Atomically persist recovery observations and an optional stop reason."""
+
     async def delete_for_test(self, execution_id: str) -> None:
         """Remove one execution only for deterministic test cleanup."""
 
@@ -78,6 +86,14 @@ class DurableExecutionRepository(Protocol):
         self, execution_id: str
     ) -> list[OrphanedOperation]:
         """List committed intents that have no durable terminal outcome."""
+
+    async def recover_orphaned_operation_claim(
+        self,
+        execution_id: str,
+        step_id: int,
+        operation_id: str,
+    ) -> OperationClaim:
+        """Reconstruct the committed intent identity for a proven recovery outcome."""
 
     async def prepare_tool_step(
         self,

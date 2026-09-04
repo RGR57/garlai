@@ -83,6 +83,20 @@ class SQLiteDurableExecutionRepository(DurableExecutionRepository):
     async def list_recoverable(self) -> list[ExecutionRun]:
         return await self._run(self._list_recoverable)
 
+    async def record_reconciliation(
+        self,
+        execution_id: str,
+        execution_context_patch: dict,
+        recovery_reason: str | None = None,
+    ) -> None:
+        await self._run(
+            lambda: self._record_reconciliation(
+                execution_id,
+                execution_context_patch,
+                recovery_reason,
+            )
+        )
+
     async def delete_for_test(self, execution_id: str) -> None:
         await self._run(lambda: self._delete_for_test(execution_id))
 
@@ -153,6 +167,20 @@ class SQLiteDurableExecutionRepository(DurableExecutionRepository):
     ) -> list[OrphanedOperation]:
         return await self._run(
             lambda: self._list_orphaned_operations(execution_id)
+        )
+
+    async def recover_orphaned_operation_claim(
+        self,
+        execution_id: str,
+        step_id: int,
+        operation_id: str,
+    ) -> OperationClaim:
+        return await self._run(
+            lambda: self._recover_orphaned_operation_claim(
+                execution_id,
+                step_id,
+                operation_id,
+            )
         )
 
     async def prepare_tool_step(
@@ -395,6 +423,51 @@ class SQLiteDurableExecutionRepository(DurableExecutionRepository):
         try:
             connection.execute("BEGIN IMMEDIATE")
             self._merge_execution_context_patch(connection, execution_id, patch)
+            connection.commit()
+        except Exception:
+            connection.rollback()
+            raise
+        finally:
+            connection.close()
+
+    def _record_reconciliation(
+        self,
+        execution_id: str,
+        execution_context_patch: dict,
+        recovery_reason: str | None,
+    ) -> None:
+        if recovery_reason is not None and (
+            not isinstance(recovery_reason, str) or not recovery_reason.strip()
+        ):
+            raise ValueError("Recovery reason must be a non-empty string when provided.")
+        connection = self._connect()
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            self._merge_execution_context_patch(
+                connection,
+                execution_id,
+                execution_context_patch,
+            )
+            if recovery_reason is not None:
+                self._merge_execution_context_patch(
+                    connection,
+                    execution_id,
+                    {"recovery": {"reason": recovery_reason}},
+                )
+                updated = connection.execute(
+                    """
+                    UPDATE execution_runs SET status = ?, updated_at = ?
+                    WHERE execution_id = ? AND status = ?
+                    """,
+                    (
+                        ExecutionRunStatus.RECOVERY_REQUIRED.value,
+                        _now(),
+                        execution_id,
+                        ExecutionRunStatus.RUNNING.value,
+                    ),
+                ).rowcount
+                if updated != 1:
+                    raise ValueError("Recovery checkpoint requires a running execution.")
             connection.commit()
         except Exception:
             connection.rollback()
@@ -1362,6 +1435,48 @@ class SQLiteDurableExecutionRepository(DurableExecutionRepository):
         except Exception:
             connection.rollback()
             raise
+        finally:
+            connection.close()
+
+    def _recover_orphaned_operation_claim(
+        self,
+        execution_id: str,
+        step_id: int,
+        operation_id: str,
+    ) -> OperationClaim:
+        connection = self._connect()
+        try:
+            row = connection.execute(
+                """
+                SELECT status FROM execution_steps
+                WHERE execution_id = ? AND step_id = ? AND operation_id = ?
+                """,
+                (execution_id, step_id, operation_id),
+            ).fetchone()
+            if row is None or row["status"] != DurableStepStatus.EXECUTING.value:
+                return OperationClaim.denied(execution_id, step_id, operation_id)
+            intent = connection.execute(
+                """
+                SELECT attempt_id FROM operation_journal
+                WHERE execution_id = ? AND step_id = ? AND operation_id = ?
+                  AND event_type = ?
+                """,
+                (
+                    execution_id,
+                    step_id,
+                    operation_id,
+                    OperationEventType.INTENT_RECORDED.value,
+                ),
+            ).fetchone()
+            if intent is None:
+                return OperationClaim.denied(execution_id, step_id, operation_id)
+            return OperationClaim(
+                granted=True,
+                execution_id=execution_id,
+                step_id=step_id,
+                operation_id=operation_id,
+                attempt_id=intent["attempt_id"],
+            )
         finally:
             connection.close()
 

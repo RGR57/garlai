@@ -7,9 +7,11 @@ from src.models.durable_execution import (
     DurableStepStatus,
     ExecutionRun,
     ExecutionRunStatus,
+    OrphanedOperation,
 )
 from src.models.execution_state import ExecutionState, StepResult
 from src.repositories.durable_execution_repository import DurableExecutionRepository
+from src.services.execution_reconciler import ExecutionReconciler
 
 
 ORPHANED_OPERATION_REASON = (
@@ -31,8 +33,13 @@ class RecoveryDecision:
 class RecoveryService:
     """Rebuild a runtime view without recreating or invoking persisted work."""
 
-    def __init__(self, repository: DurableExecutionRepository) -> None:
+    def __init__(
+        self,
+        repository: DurableExecutionRepository,
+        reconciler: ExecutionReconciler | None = None,
+    ) -> None:
         self.repository = repository
+        self.reconciler = reconciler
 
     async def prepare_resume(self, execution_id: str) -> RecoveryDecision:
         run = await self.repository.load(execution_id)
@@ -50,29 +57,17 @@ class RecoveryService:
             return self._decision(run, pending_approval=approval)
 
         if run.status is ExecutionRunStatus.RUNNING:
-            for orphan in await self.repository.list_orphaned_operations(execution_id):
-                try:
-                    await self.repository.mark_operation_uncertain(
-                        orphan.execution_id,
-                        orphan.step_id,
-                        orphan.operation_id,
-                        ORPHANED_OPERATION_REASON,
-                    )
-                except ValueError:
-                    latest = await self.repository.load(execution_id)
-                    step = next(
-                        (
-                            candidate
-                            for candidate in latest.steps
-                            if candidate.step_id == orphan.step_id
-                        ),
-                        None,
-                    )
-                    if step is None or step.status not in {
-                        DurableStepStatus.COMPLETED,
-                        DurableStepStatus.KNOWN_FAILED,
-                    }:
-                        raise
+            orphaned_operations = await self.repository.list_orphaned_operations(
+                execution_id
+            )
+            if self.reconciler is not None:
+                await self.reconciler.reconcile(run, orphaned_operations)
+                run = await self.repository.load(execution_id)
+            if run.status is ExecutionRunStatus.RUNNING:
+                await self._mark_remaining_orphans_uncertain(
+                    execution_id,
+                    await self.repository.list_orphaned_operations(execution_id),
+                )
             run = await self.repository.load(execution_id)
 
         if run.status is ExecutionRunStatus.RECOVERY_REQUIRED:
@@ -80,6 +75,35 @@ class RecoveryService:
 
         next_step_id = self._first_pending_step_id(run)
         return self._decision(run, may_execute=next_step_id is not None, next_step_id=next_step_id)
+
+    async def _mark_remaining_orphans_uncertain(
+        self,
+        execution_id: str,
+        orphaned_operations: list[OrphanedOperation],
+    ) -> None:
+        for orphan in orphaned_operations:
+            try:
+                await self.repository.mark_operation_uncertain(
+                    orphan.execution_id,
+                    orphan.step_id,
+                    orphan.operation_id,
+                    ORPHANED_OPERATION_REASON,
+                )
+            except ValueError:
+                latest = await self.repository.load(execution_id)
+                step = next(
+                    (
+                        candidate
+                        for candidate in latest.steps
+                        if candidate.step_id == orphan.step_id
+                    ),
+                    None,
+                )
+                if step is None or step.status not in {
+                    DurableStepStatus.COMPLETED,
+                    DurableStepStatus.KNOWN_FAILED,
+                }:
+                    raise
 
     def _decision(
         self,

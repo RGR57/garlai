@@ -58,6 +58,7 @@ from src.services.brave_research_provider import BraveResearchProvider
 from src.services.research_provider import FakeResearchProvider, ResearchProvider
 from src.services.browser_provider import BrowserProvider
 from src.services.browser_session_service import BrowserSessionService
+from src.services.execution_reconciler import BrowserExecutionReconciler
 from src.services.fake_browser_provider import FakeBrowserProvider
 from src.services.navigation_policy import ProductionNavigationPolicy
 from src.services.playwright_browser_provider import PlaywrightBrowserProvider
@@ -436,7 +437,14 @@ def get_approval_service() -> ApprovalService:
 
 @lru_cache
 def get_durable_execution_service() -> DurableExecutionService:
-    return DurableExecutionService(get_durable_execution_repository())
+    repository = get_durable_execution_repository()
+    return DurableExecutionService(
+        repository,
+        reconciler=BrowserExecutionReconciler(
+            repository,
+            get_browser_session_service(),
+        ),
+    )
 
 
 

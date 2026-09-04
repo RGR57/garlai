@@ -18,7 +18,14 @@ class BrowserSubmitTool(BaseTool):
 
     @property
     def input_schema(self) -> dict:
-        return {"type": "object", "properties": {"target": {"type": "object"}}, "required": ["target"]}
+        return {
+            "type": "object",
+            "properties": {
+                "target": {"type": "object"},
+                "expected_success_text": {"type": "string"},
+            },
+            "required": ["target"],
+        }
 
     async def execute(self, **kwargs) -> ToolResult:
         raise RuntimeError("Browser submit requires a durable approved invocation context.")

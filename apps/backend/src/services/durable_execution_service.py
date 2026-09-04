@@ -9,15 +9,20 @@ from src.models.durable_execution import (
 )
 from src.models.plan import ExecutionPlan
 from src.repositories.durable_execution_repository import DurableExecutionRepository
+from src.services.execution_reconciler import ExecutionReconciler
 from src.services.recovery_service import RecoveryDecision, RecoveryService
 
 
 class DurableExecutionService:
     """Own creation and one-time materialization of durable execution runs."""
 
-    def __init__(self, repository: DurableExecutionRepository) -> None:
+    def __init__(
+        self,
+        repository: DurableExecutionRepository,
+        reconciler: ExecutionReconciler | None = None,
+    ) -> None:
         self.repository = repository
-        self.recovery_service = RecoveryService(repository)
+        self.recovery_service = RecoveryService(repository, reconciler=reconciler)
 
     async def start(
         self,

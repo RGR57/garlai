@@ -96,6 +96,23 @@ class BrowserSessionService:
         )
         return observation
 
+    async def observe_for_recovery(
+        self,
+        execution_id: str,
+        last_verified_url: str,
+    ) -> BrowserObservation:
+        """Build a fresh session and observe without replaying browser actions."""
+        session = await self.get_or_create(execution_id)
+        await self.provider.navigate(
+            session.provider_session,
+            last_verified_url,
+            self.navigation_policy,
+        )
+        observation = await self.provider.observe(session.provider_session)
+        if observation.browser_session_id != session.browser_session_id:
+            raise ValueError("Browser provider observation does not belong to the execution session.")
+        return observation
+
     async def select(
         self,
         execution_id: str,
@@ -169,6 +186,15 @@ class BrowserSessionService:
         if target.browser_session_id != session.browser_session_id:
             raise ValueError("Browser target belongs to a different execution session.")
         observation = await self.provider.observe(session.provider_session)
+        if not self.target_matches(observation, target):
+            raise ValueError("Browser target is missing, changed, or ambiguous on the current page.")
+        return session, observation
+
+    @staticmethod
+    def target_matches(
+        observation: BrowserObservation,
+        target: BrowserTarget,
+    ) -> bool:
         matches = [
             element
             for element in observation.elements
@@ -180,9 +206,7 @@ class BrowserSessionService:
             and element.semantic_fingerprint == target.semantic_fingerprint
             and element.is_sensitive == target.is_sensitive
         ]
-        if len(matches) != 1 or observation.url != target.observed_url:
-            raise ValueError("Browser target is missing, changed, or ambiguous on the current page.")
-        return session, observation
+        return len(matches) == 1 and observation.url == target.observed_url
 
     @staticmethod
     def _receipt(

@@ -3,6 +3,7 @@ import pytest
 from src.models.tool_result import ToolInvocationOutcome, ToolResult
 from src.tools.base_tool import ToolInvocationContext
 from src.tools.browser.browser_submit_tool import BrowserSubmitTool
+from src.tools.tool_manager import ToolManager
 
 
 def target_payload() -> dict[str, object]:
@@ -53,3 +54,16 @@ async def test_submit_executes_only_with_approved_context_after_ready_preflight(
 
     assert len(service.submit_calls) == 1
     assert result.invocation_outcome is ToolInvocationOutcome.CONFIRMED
+
+
+def test_submit_schema_freezes_a_non_sensitive_visible_success_proof():
+    manager = ToolManager()
+    manager.register(BrowserSubmitTool(RecordingBrowserSessionService(ready=True)))
+
+    valid, error = manager.validate_arguments(
+        "browser_submit",
+        {"target": target_payload(), "expected_success_text": "Signup complete"},
+    )
+
+    assert valid is True
+    assert error is None
