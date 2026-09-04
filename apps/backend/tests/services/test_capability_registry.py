@@ -70,3 +70,6 @@ def test_web_operation_exposes_only_registered_browser_read_tools():
         "browser_navigate",
         "browser_observe",
     )
+    assert "result_contract=browser_target" in registry.planner_description(
+        ("web_operation",)
+    )

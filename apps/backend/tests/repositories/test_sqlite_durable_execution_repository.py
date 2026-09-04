@@ -1,3 +1,4 @@
+import sqlite3
 import unittest
 
 from src.models.durable_execution import (
@@ -10,6 +11,7 @@ from src.models.durable_execution import (
 
 from src.repositories.sqlite_durable_execution_repository import (
     SQLiteDurableExecutionRepository,
+    _MIGRATION_1_STATEMENTS,
 )
 
 
@@ -21,9 +23,39 @@ class SQLiteDurableExecutionRepositoryTests(unittest.IsolatedAsyncioTestCase):
         await repository.initialize()
         await repository.initialize()
 
-        self.assertEqual(await repository.schema_versions(), [1])
+        self.assertEqual(await repository.schema_versions(), [1, 2])
         self.assertTrue(await repository.foreign_keys_enabled())
         self.assertEqual(await repository.journal_mode(), "wal")
+
+    async def test_initialize_upgrades_a_version_one_database_for_result_contracts(self):
+        database_path = self._tmp_path("durable-v1.sqlite3")
+        connection = sqlite3.connect(database_path)
+        try:
+            connection.execute(
+                "CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)"
+            )
+            for statement in _MIGRATION_1_STATEMENTS:
+                connection.execute(statement)
+            connection.execute(
+                "INSERT INTO schema_migrations (version, applied_at) VALUES (1, '2026-09-04T00:00:00Z')"
+            )
+            connection.commit()
+        finally:
+            connection.close()
+
+        repository = SQLiteDurableExecutionRepository(database_path)
+        await repository.initialize()
+
+        self.assertEqual(await repository.schema_versions(), [1, 2])
+        connection = sqlite3.connect(database_path)
+        try:
+            columns = {
+                row[1]
+                for row in connection.execute("PRAGMA table_info(execution_steps)")
+            }
+        finally:
+            connection.close()
+        self.assertIn("result_contract", columns)
 
     async def test_fresh_repository_loads_persisted_run_and_completed_step(self):
         path = self._tmp_path("restart.sqlite3")
@@ -60,6 +92,31 @@ class SQLiteDurableExecutionRepositoryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(loaded.variables, {"step1": "first output"})
         self.assertEqual(loaded.steps[0].status, DurableStepStatus.COMPLETED)
         self.assertEqual(loaded.steps[0].result, {"output": "first output"})
+
+    async def test_fresh_repository_preserves_a_constrained_llm_result_contract(self):
+        path = self._tmp_path("result-contract.sqlite3")
+        first = SQLiteDurableExecutionRepository(path)
+        await first.initialize()
+        await first.create_planning_run(
+            ExecutionRun(execution_id="run-contract", objective="select a plan")
+        )
+        await first.persist_validated_plan(
+            "run-contract",
+            [
+                DurableStep(
+                    step_id=1,
+                    ordinal=0,
+                    action="select observed plan",
+                    tool=None,
+                    plan_input="{{step0}}",
+                    result_contract="browser_target",
+                )
+            ],
+        )
+
+        loaded = await SQLiteDurableExecutionRepository(path).load("run-contract")
+
+        self.assertEqual(loaded.steps[0].result_contract, "browser_target")
 
     async def test_load_rejects_invalid_constrained_json(self):
         repository = SQLiteDurableExecutionRepository(

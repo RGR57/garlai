@@ -135,3 +135,17 @@ class BrowserTarget:
             raise ValueError("text_context must be a string.")
         if len(self.text_context) > MAX_BROWSER_ELEMENT_CONTEXT_CHARACTERS:
             raise ValueError("text_context exceeds its maximum length.")
+
+    def to_payload(self) -> dict[str, str | None]:
+        return {
+            "browser_session_id": self.browser_session_id,
+            "observation_id": self.observation_id,
+            "element_ref": self.element_ref,
+            "observed_url": self.observed_url,
+            "role": self.role,
+            "accessible_name": self.accessible_name,
+            "label": self.label,
+            "form_name": self.form_name,
+            "text_context": self.text_context,
+            "semantic_fingerprint": self.semantic_fingerprint,
+        }

@@ -29,6 +29,11 @@ class PlanValidator:
         r"\{\{step(\d+)\}\}"
     )
 
+    RESULT_CONTRACTS = {
+        "browser_target",
+        "browser_verification",
+    }
+
     def __init__(
         self,
         tool_manager: ToolManager,
@@ -94,6 +99,11 @@ class PlanValidator:
         )
 
         self._validate_arguments(
+            plan,
+            errors,
+        )
+
+        self._validate_result_contracts(
             plan,
             errors,
         )
@@ -202,6 +212,11 @@ class PlanValidator:
                 errors.append(
                     f"Step {step.id} arguments must "
                     f"be a dictionary."
+                )
+
+            if step.result_contract is not None and not isinstance(step.result_contract, str):
+                errors.append(
+                    f"Step {step.id} has an invalid result contract."
                 )
 
     # ==========================================================
@@ -371,6 +386,27 @@ class PlanValidator:
             completed_steps.add(
                 step.id
             )
+
+    # ==========================================================
+    # CONSTRAINED LLM OUTPUT
+    # ==========================================================
+
+    def _validate_result_contracts(
+        self,
+        plan: ExecutionPlan,
+        errors: list[str],
+    ) -> None:
+        for step in plan.steps:
+            if step.result_contract is None:
+                continue
+            if step.tool is not None:
+                errors.append(
+                    f"Step {step.id}: result contracts are only valid for tool-free LLM steps."
+                )
+            if step.result_contract not in self.RESULT_CONTRACTS:
+                errors.append(
+                    f"Step {step.id}: unknown result contract '{step.result_contract}'."
+                )
 
     # ==========================================================
     # REFERENCE EXTRACTION
@@ -572,6 +608,7 @@ class PlanValidator:
                 str(step.tool).strip().lower(),
                 str(step.input).strip(),
                 arguments,
+                str(step.result_contract).strip(),
             ]
         )
 

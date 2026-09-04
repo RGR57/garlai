@@ -1,9 +1,12 @@
 from typing import Any
+import re
 
 from src.models.execution_state import ExecutionState
 
 
 class VariableResolver:
+
+    _EXACT_REFERENCE = re.compile(r"^\{\{([^{}]+)\}\}$")
 
     def resolve(
         self,
@@ -58,15 +61,24 @@ class VariableResolver:
         self,
         text: str,
         state: ExecutionState,
-    ) -> str:
+    ) -> Any:
+
+        exact_reference = self._EXACT_REFERENCE.fullmatch(text)
+        if exact_reference is not None:
+            key = exact_reference.group(1)
+            if key in state.variables:
+                return state.variables[key]
 
         result = text
 
         for key, value in state.variables.items():
-
-            result = result.replace(
-                f"{{{{{key}}}}}",
-                str(value),
-            )
+            placeholder = f"{{{{{key}}}}}"
+            if placeholder not in result:
+                continue
+            if not isinstance(value, (str, int, float, bool, type(None))):
+                raise ValueError(
+                    f"Structured variable '{key}' cannot be embedded in text."
+                )
+            result = result.replace(placeholder, str(value))
 
         return result

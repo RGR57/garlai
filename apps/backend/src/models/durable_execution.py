@@ -304,6 +304,7 @@ class DurableStep:
     action: str
     tool: str | None
     plan_input: str = ""
+    result_contract: str | None = None
     arguments: dict[str, JsonValue] = field(default_factory=dict)
     resolved_arguments: dict[str, JsonValue] | None = None
     classification: str | None = None
@@ -319,6 +320,8 @@ class DurableStep:
     updated_at: datetime | None = None
 
     def __post_init__(self) -> None:
+        if self.result_contract is not None and not isinstance(self.result_contract, str):
+            raise ValueError("result_contract must be a string or None")
         self.arguments = _validated_json_mapping(self.arguments, "arguments")
         if self.resolved_arguments is not None:
             self.resolved_arguments = _validated_json_mapping(

@@ -32,7 +32,7 @@ T = TypeVar("T")
 class SQLiteDurableExecutionRepository(DurableExecutionRepository):
     """SQLite persistence for the durable execution aggregate and journals."""
 
-    SCHEMA_VERSION = 1
+    SCHEMA_VERSION = 2
 
     def __init__(
         self,
@@ -263,15 +263,17 @@ class SQLiteDurableExecutionRepository(DurableExecutionRepository):
                     "SELECT version FROM schema_migrations"
                 )
             }
-            if self.SCHEMA_VERSION not in applied:
-                for statement in _MIGRATION_1_STATEMENTS:
+            for version, statements in _MIGRATIONS:
+                if version in applied:
+                    continue
+                for statement in statements:
                     connection.execute(statement)
                 connection.execute(
                     """
                     INSERT INTO schema_migrations (version, applied_at)
                     VALUES (?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
                     """,
-                    (self.SCHEMA_VERSION,),
+                    (version,),
                 )
             connection.commit()
         except Exception:
@@ -424,11 +426,11 @@ class SQLiteDurableExecutionRepository(DurableExecutionRepository):
         connection.execute(
             """
             INSERT INTO execution_steps (
-                execution_id, step_id, ordinal, action, tool, plan_input,
+                execution_id, step_id, ordinal, action, tool, plan_input, result_contract,
                 arguments_json, resolved_arguments_json, classification, status,
                 operation_id, payload_hash, attempt_count, result_json, error_json,
                 artifact_json, metadata_json, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 execution_id,
@@ -437,6 +439,7 @@ class SQLiteDurableExecutionRepository(DurableExecutionRepository):
                 step.action,
                 step.tool,
                 step.plan_input,
+                step.result_contract,
                 _encode_json(step.arguments),
                 _encode_optional_json(step.resolved_arguments),
                 step.classification,
@@ -1455,6 +1458,17 @@ _MIGRATION_1_STATEMENTS = (
 )
 
 
+_MIGRATION_2_STATEMENTS = (
+    "ALTER TABLE execution_steps ADD COLUMN result_contract TEXT",
+)
+
+
+_MIGRATIONS = (
+    (1, _MIGRATION_1_STATEMENTS),
+    (2, _MIGRATION_2_STATEMENTS),
+)
+
+
 def _encode_json(value: object) -> str:
     try:
         return json.dumps(
@@ -1534,6 +1548,7 @@ def _decode_run(
                 action=row["action"],
                 tool=row["tool"],
                 plan_input=row["plan_input"],
+                result_contract=row["result_contract"],
                 arguments=_decode_mapping(row["arguments_json"], "step arguments"),
                 resolved_arguments=_decode_optional_mapping(
                     row["resolved_arguments_json"],

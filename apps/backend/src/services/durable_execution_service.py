@@ -74,6 +74,7 @@ class DurableExecutionService:
             action=step.action,
             tool=step.tool,
             plan_input=step.input,
+            result_contract=step.result_contract,
             arguments=step.arguments,
             operation_id=operation_id,
             payload_hash=payload_hash,
