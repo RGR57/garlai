@@ -65,6 +65,7 @@ class ApprovalEventType(str, Enum):
     REQUESTED = "requested"
     APPROVED = "approved"
     REJECTED = "rejected"
+    INVALIDATED = "invalidated"
 
 
 RUN_STATE_TRANSITIONS: dict[ExecutionRunStatus, frozenset[ExecutionRunStatus]] = {
@@ -95,6 +96,7 @@ STEP_STATE_TRANSITIONS: dict[DurableStepStatus, frozenset[DurableStepStatus]] = 
         {
             DurableStepStatus.EXECUTING,
             DurableStepStatus.WAITING_APPROVAL,
+            DurableStepStatus.KNOWN_FAILED,
         }
     ),
     DurableStepStatus.EXECUTING: frozenset(

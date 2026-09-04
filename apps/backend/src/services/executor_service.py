@@ -52,6 +52,7 @@ from src.repositories.durable_execution_repository import (
 from src.tools.tool_manager import (
     ToolManager,
 )
+from src.tools.base_tool import ToolInvocationContext
 
 from src.utils.logger import (
     logger,
@@ -83,6 +84,7 @@ class ExecutorService:
         messages: list[ConversationMessage],
         state: ExecutionState,
         approved_payload_hash: str | None = None,
+        approval_id: str | None = None,
         finalize: bool = True,
     ) -> StepResult:
         if self.durable_repository is None:
@@ -243,7 +245,15 @@ class ExecutorService:
                     metadata={"durable_skip": True},
                 )
             try:
-                tool_result = await tool.execute(**arguments)
+                tool_result = await self.tool_manager.execute(
+                    step.tool,
+                    arguments,
+                    ToolInvocationContext(
+                        execution_id=execution_id,
+                        step_id=step_id,
+                        operation_id=step.operation_id,
+                    ),
+                )
             except Exception as exc:
                 await self.durable_repository.record_read_only_outcome(
                     execution_id,
@@ -302,6 +312,34 @@ class ExecutorService:
                 action=step.action,
             )
 
+        invocation = ToolInvocationContext(
+            execution_id=execution_id,
+            step_id=step_id,
+            operation_id=step.operation_id,
+            approved_payload_hash=approved_payload_hash,
+        )
+        preflight = await self.tool_manager.preflight(
+            step.tool,
+            arguments,
+            invocation,
+        )
+        if not preflight.ready:
+            reason = preflight.reason or "not ready"
+            if approval_id is not None:
+                await self.durable_repository.invalidate_approval(
+                    execution_id,
+                    approval_id,
+                    f"Approved operation preflight failed: {reason}",
+                )
+            return StepResult(
+                step_id=step_id,
+                success=False,
+                error=f"Consequential preflight failed: {reason}",
+                tool=step.tool,
+                action=step.action,
+                metadata={"durable_preflight": "not_ready"},
+            )
+
         claim = await self.durable_repository.claim_operation(
             execution_id,
             step_id,
@@ -318,7 +356,11 @@ class ExecutorService:
                 metadata={"durable_skip": True},
             )
         try:
-            tool_result = await tool.execute(**arguments)
+            tool_result = await self.tool_manager.execute(
+                step.tool,
+                arguments,
+                invocation,
+            )
         except Exception as exc:
             await self.durable_repository.mark_operation_uncertain(
                 execution_id,
@@ -540,8 +582,14 @@ class ExecutorService:
 
         try:
 
-            tool_result = await tool.execute(
-                **arguments
+            tool_result = await self.tool_manager.execute(
+                step.tool,
+                arguments,
+                ToolInvocationContext(
+                    execution_id=None,
+                    step_id=step.id,
+                    operation_id=None,
+                ),
             )
             logger.info(
                 "Tool output: %s",

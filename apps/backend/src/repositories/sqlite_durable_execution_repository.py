@@ -230,6 +230,16 @@ class SQLiteDurableExecutionRepository(DurableExecutionRepository):
     async def reject(self, execution_id: str, approval_id: str) -> None:
         await self._run(lambda: self._reject(execution_id, approval_id))
 
+    async def invalidate_approval(
+        self,
+        execution_id: str,
+        approval_id: str,
+        reason: str,
+    ) -> None:
+        await self._run(
+            lambda: self._invalidate_approval(execution_id, approval_id, reason)
+        )
+
     async def _run(self, operation: Callable[[], T]) -> T:
         return await asyncio.to_thread(operation)
 
@@ -1251,7 +1261,7 @@ class SQLiteDurableExecutionRepository(DurableExecutionRepository):
                       SELECT 1
                       FROM approval_journal AS terminal
                       WHERE terminal.approval_id = requested.approval_id
-                        AND terminal.event_type IN (?, ?)
+                        AND terminal.event_type IN (?, ?, ?)
                   )
                 ORDER BY requested.occurred_at, requested.rowid
                 """,
@@ -1260,6 +1270,7 @@ class SQLiteDurableExecutionRepository(DurableExecutionRepository):
                     ApprovalEventType.REQUESTED.value,
                     ApprovalEventType.APPROVED.value,
                     ApprovalEventType.REJECTED.value,
+                    ApprovalEventType.INVALIDATED.value,
                 ),
             ).fetchall()
             if not rows:
@@ -1347,6 +1358,92 @@ class SQLiteDurableExecutionRepository(DurableExecutionRepository):
                 "UPDATE execution_runs SET status = ?, updated_at = ? WHERE execution_id = ? AND status = ?",
                 (ExecutionRunStatus.FAILED.value, _now(), execution_id, ExecutionRunStatus.WAITING_APPROVAL.value),
             )
+            connection.commit()
+        except Exception:
+            connection.rollback()
+            raise
+        finally:
+            connection.close()
+
+    def _invalidate_approval(
+        self,
+        execution_id: str,
+        approval_id: str,
+        reason: str,
+    ) -> None:
+        if not isinstance(reason, str) or not reason.strip():
+            raise ValueError("Approval invalidation requires a non-empty reason.")
+
+        connection = self._connect()
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            approval = self._get_approval_in_transaction(
+                connection,
+                execution_id,
+                approval_id,
+            )
+            if approval.event_type is not ApprovalEventType.APPROVED:
+                raise ValueError("Only an approved operation may be invalidated.")
+
+            updated = connection.execute(
+                """
+                UPDATE execution_steps
+                SET status = ?, error_json = ?, updated_at = ?
+                WHERE execution_id = ? AND step_id = ? AND status = ?
+                  AND operation_id = ? AND payload_hash = ?
+                """,
+                (
+                    DurableStepStatus.KNOWN_FAILED.value,
+                    _encode_json({"reason": reason, "recovery_required": True}),
+                    _now(),
+                    execution_id,
+                    approval.step_id,
+                    DurableStepStatus.PENDING.value,
+                    approval.operation_id,
+                    approval.payload_hash,
+                ),
+            ).rowcount
+            if updated != 1:
+                raise ValueError("Invalidated operation no longer matches its frozen step.")
+
+            payload = _approval_payload(approval)
+            payload["invalidation_reason"] = reason
+            connection.execute(
+                """
+                INSERT INTO approval_journal (
+                    approval_event_id, approval_id, execution_id, step_id,
+                    operation_id, event_type, canonical_payload_json, payload_hash,
+                    occurred_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    str(uuid.uuid4()),
+                    approval_id,
+                    execution_id,
+                    approval.step_id,
+                    approval.operation_id,
+                    ApprovalEventType.INVALIDATED.value,
+                    _encode_json(payload),
+                    approval.payload_hash,
+                    _now(),
+                ),
+            )
+            run_updated = connection.execute(
+                """
+                UPDATE execution_runs
+                SET status = ?, current_step_id = ?, next_step_id = NULL, updated_at = ?
+                WHERE execution_id = ? AND status = ?
+                """,
+                (
+                    ExecutionRunStatus.RECOVERY_REQUIRED.value,
+                    approval.step_id,
+                    _now(),
+                    execution_id,
+                    ExecutionRunStatus.RUNNING.value,
+                ),
+            ).rowcount
+            if run_updated != 1:
+                raise ValueError("Approval invalidation requires a running execution.")
             connection.commit()
         except Exception:
             connection.rollback()

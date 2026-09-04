@@ -130,6 +130,33 @@ class BrowserSessionService:
         await self._record_action(execution_id, operation_id, receipt)
         return receipt
 
+    async def preflight_submit(
+        self,
+        execution_id: str,
+        target: BrowserTarget,
+        operation_id: str,
+    ) -> tuple[bool, str | None]:
+        try:
+            await self._resolve_target(execution_id, target, operation_id)
+        except ValueError as exc:
+            return False, str(exc)
+        return True, None
+
+    async def submit(
+        self,
+        execution_id: str,
+        target: BrowserTarget,
+        operation_id: str,
+    ) -> dict[str, object]:
+        session = await self.get_or_create(execution_id)
+        if target.browser_session_id != session.browser_session_id:
+            raise ValueError("Browser target belongs to a different execution session.")
+        await self.provider.submit(session.provider_session, target)
+        observation = await self.provider.observe(session.provider_session)
+        receipt = self._receipt("submit", target, observation)
+        await self._record_action(execution_id, operation_id, receipt)
+        return receipt
+
     async def _resolve_target(
         self,
         execution_id: str,

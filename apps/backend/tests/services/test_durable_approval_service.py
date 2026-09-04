@@ -107,6 +107,32 @@ class DurableApprovalRepositoryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(loaded.steps[0].status, DurableStepStatus.REJECTED)
         self.assertEqual(await repository.operation_events("operation-1"), [])
 
+    async def test_stale_approved_operation_is_durably_invalidated_for_recovery(self):
+        repository = await self._repository()
+        approval = self._approval()
+        await repository.request_approval(approval)
+        await repository.approve(
+            approval.execution_id,
+            approval.approval_id,
+            approval.payload_hash,
+        )
+
+        await repository.invalidate_approval(
+            approval.execution_id,
+            approval.approval_id,
+            "Approved browser commitment no longer matches the current page.",
+        )
+
+        restored = SQLiteDurableExecutionRepository(repository.database_path)
+        loaded_approval = await restored.get_approval("run-1", "approval-1")
+        loaded_run = await restored.load("run-1")
+
+        self.assertEqual(loaded_approval.event_type, ApprovalEventType.INVALIDATED)
+        self.assertEqual(loaded_run.status, ExecutionRunStatus.RECOVERY_REQUIRED)
+        self.assertEqual(loaded_run.steps[0].status, DurableStepStatus.KNOWN_FAILED)
+        self.assertEqual(await restored.get_pending_approval("run-1"), None)
+        self.assertEqual(await restored.operation_events("operation-1"), [])
+
     async def test_approval_after_restart_executes_frozen_operation_once(self):
         repository = await self._repository()
         await repository.request_approval(self._approval())

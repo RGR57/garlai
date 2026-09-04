@@ -67,6 +67,11 @@ class PermissionService:
                 RiskLevel.MEDIUM,
                 "Browser preparation is allowed but treated as a consequential action.",
             )
+        elif tool_name == "browser_submit":
+            result = self._require_approval(
+                RiskLevel.HIGH,
+                "Browser submit commits external state and requires approval.",
+            )
         else:
             # Unknown tools must never silently execute.
             result = self._deny(

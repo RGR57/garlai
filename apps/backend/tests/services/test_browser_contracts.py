@@ -128,6 +128,7 @@ def test_browser_observation_serializes_as_bounded_json_facts():
                 "label": None,
                 "form_name": None,
                 "text_context": "",
+                "is_sensitive": False,
             }
         ],
         "observed_at": "2026-09-04T00:00:00+00:00",

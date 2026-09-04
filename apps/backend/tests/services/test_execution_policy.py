@@ -55,6 +55,13 @@ class ExecutionPolicyTests(unittest.TestCase):
             self.assertTrue(result.execution_policy.is_consequential)
             self.assertFalse(result.execution_policy.retry_known_failure)
 
+    def test_browser_submit_requires_high_risk_approval(self):
+        result = self.permission.evaluate("browser_submit", {})
+
+        self.assertEqual(result.decision, PermissionDecision.REQUIRE_APPROVAL)
+        self.assertTrue(result.execution_policy.is_consequential)
+        self.assertFalse(result.execution_policy.retry_known_failure)
+
 
 if __name__ == "__main__":
     unittest.main()

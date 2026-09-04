@@ -128,3 +128,11 @@ class DurableExecutionRepository(Protocol):
 
     async def reject(self, execution_id: str, approval_id: str) -> None:
         """Reject one frozen approval without invoking its operation."""
+
+    async def invalidate_approval(
+        self,
+        execution_id: str,
+        approval_id: str,
+        reason: str,
+    ) -> None:
+        """Preserve an approved-but-stale operation as a recovery requirement."""

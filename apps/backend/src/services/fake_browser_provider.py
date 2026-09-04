@@ -60,6 +60,10 @@ class FakeBrowserProvider:
         self._assert_open(session)
         self.actions.append(("submit", target))
 
+    def set_page(self, url: str, observation: BrowserObservation) -> None:
+        """Replace one local fixture page to model a deterministic external change."""
+        self._pages[url] = observation
+
     @staticmethod
     def _session(session: object) -> _FakeBrowserSession:
         if not isinstance(session, _FakeBrowserSession):
