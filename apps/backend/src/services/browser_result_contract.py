@@ -67,6 +67,7 @@ class BrowserResultContract:
                 form_name=element.get("form_name"),
                 text_context=element.get("text_context", ""),
                 semantic_fingerprint=element["semantic_fingerprint"],
+                is_sensitive=element.get("is_sensitive", False),
             )
         except (KeyError, TypeError, ValueError) as exc:
             raise ValueError("Browser observation has an invalid target element.") from exc

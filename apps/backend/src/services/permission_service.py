@@ -62,6 +62,11 @@ class PermissionService:
                 RiskLevel.LOW,
                 "Browser navigation and observation are read-oriented under navigation policy.",
             )
+        elif tool_name in {"browser_select", "browser_fill"}:
+            result = self._allow(
+                RiskLevel.MEDIUM,
+                "Browser preparation is allowed but treated as a consequential action.",
+            )
         else:
             # Unknown tools must never silently execute.
             result = self._deny(

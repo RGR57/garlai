@@ -43,6 +43,7 @@ def _to_browser_element(observation_id: str, item: dict) -> BrowserElement:
         form_name=text("form_name") or None,
         text_context=text_context,
         semantic_fingerprint=_fingerprint(role, accessible_name, text_context),
+        is_sensitive=text("input_type").lower() == "password",
     )
 
 

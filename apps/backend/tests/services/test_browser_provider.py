@@ -137,3 +137,4 @@ def test_playwright_observation_never_uses_a_password_value_as_an_element_name()
 
     assert element.accessible_name == "Password"
     assert "secret" not in element.accessible_name.lower()
+    assert element.is_sensitive is True

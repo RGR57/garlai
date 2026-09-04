@@ -90,6 +90,7 @@ async def test_browser_target_contract_accepts_only_an_observed_element_referenc
         "form_name": None,
         "text_context": "Supports SSO for 10 users.",
         "semantic_fingerprint": "button|choose pro|pricing",
+        "is_sensitive": False,
     }
     assert "UNTRUSTED EXTERNAL PAGE DATA" in llm.messages[-1]["content"]
 

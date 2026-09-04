@@ -28,6 +28,7 @@ class BrowserElement:
     label: str | None = None
     form_name: str | None = None
     text_context: str = ""
+    is_sensitive: bool = False
 
     def __post_init__(self) -> None:
         _required_text(self.element_ref, "element_ref")
@@ -42,6 +43,8 @@ class BrowserElement:
             raise ValueError("text_context must be a string.")
         if len(self.text_context) > MAX_BROWSER_ELEMENT_CONTEXT_CHARACTERS:
             raise ValueError("text_context exceeds its maximum length.")
+        if not isinstance(self.is_sensitive, bool):
+            raise ValueError("is_sensitive must be a boolean.")
 
     def to_payload(self) -> dict[str, str | None]:
         return {
@@ -52,6 +55,7 @@ class BrowserElement:
             "label": self.label,
             "form_name": self.form_name,
             "text_context": self.text_context,
+            "is_sensitive": self.is_sensitive,
         }
 
 
@@ -118,6 +122,7 @@ class BrowserTarget:
     form_name: str | None
     text_context: str
     semantic_fingerprint: str
+    is_sensitive: bool = False
 
     def __post_init__(self) -> None:
         _required_text(self.browser_session_id, "browser_session_id")
@@ -135,6 +140,8 @@ class BrowserTarget:
             raise ValueError("text_context must be a string.")
         if len(self.text_context) > MAX_BROWSER_ELEMENT_CONTEXT_CHARACTERS:
             raise ValueError("text_context exceeds its maximum length.")
+        if not isinstance(self.is_sensitive, bool):
+            raise ValueError("is_sensitive must be a boolean.")
 
     def to_payload(self) -> dict[str, str | None]:
         return {
@@ -148,4 +155,29 @@ class BrowserTarget:
             "form_name": self.form_name,
             "text_context": self.text_context,
             "semantic_fingerprint": self.semantic_fingerprint,
+            "is_sensitive": self.is_sensitive,
         }
+
+    @classmethod
+    def from_payload(cls, payload: object) -> "BrowserTarget":
+        if not isinstance(payload, dict):
+            raise ValueError("Browser target must be a JSON object.")
+        required = {
+            "browser_session_id",
+            "observation_id",
+            "element_ref",
+            "observed_url",
+            "role",
+            "accessible_name",
+            "label",
+            "form_name",
+            "text_context",
+            "semantic_fingerprint",
+            "is_sensitive",
+        }
+        if set(payload) != required:
+            raise ValueError("Browser target must contain the complete semantic target.")
+        try:
+            return cls(**payload)
+        except TypeError as exc:
+            raise ValueError("Browser target has invalid fields.") from exc

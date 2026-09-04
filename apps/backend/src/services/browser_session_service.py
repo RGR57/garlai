@@ -2,8 +2,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
+import hashlib
 
-from src.models.browser import BrowserObservation
+from src.models.browser import BrowserObservation, BrowserTarget
 from src.repositories.durable_execution_repository import DurableExecutionRepository
 from src.services.browser_provider import BrowserProvider, NavigationPolicy
 
@@ -94,6 +95,102 @@ class BrowserSessionService:
             },
         )
         return observation
+
+    async def select(
+        self,
+        execution_id: str,
+        target: BrowserTarget,
+        operation_id: str,
+    ) -> dict[str, object]:
+        session, observation = await self._resolve_target(execution_id, target, operation_id)
+        await self.provider.select(session.provider_session, target)
+        receipt = self._receipt("select", target, observation)
+        await self._record_action(execution_id, operation_id, receipt)
+        return receipt
+
+    async def fill(
+        self,
+        execution_id: str,
+        target: BrowserTarget,
+        value: str,
+        operation_id: str,
+    ) -> dict[str, object]:
+        if target.is_sensitive:
+            raise ValueError("Browser fill refuses a sensitive field.")
+        if not isinstance(value, str) or not value:
+            raise ValueError("Browser fill value must be a non-empty string.")
+        session, observation = await self._resolve_target(execution_id, target, operation_id)
+        await self.provider.fill(session.provider_session, target, value)
+        receipt = self._receipt(
+            "fill",
+            target,
+            observation,
+            value_hash=hashlib.sha256(value.encode("utf-8")).hexdigest(),
+        )
+        await self._record_action(execution_id, operation_id, receipt)
+        return receipt
+
+    async def _resolve_target(
+        self,
+        execution_id: str,
+        target: BrowserTarget,
+        operation_id: str,
+    ) -> tuple[BrowserSession, BrowserObservation]:
+        if not operation_id:
+            raise ValueError("Browser preparation requires a durable operation identity.")
+        session = await self.get_or_create(execution_id)
+        if target.browser_session_id != session.browser_session_id:
+            raise ValueError("Browser target belongs to a different execution session.")
+        observation = await self.provider.observe(session.provider_session)
+        matches = [
+            element
+            for element in observation.elements
+            if element.role == target.role
+            and element.accessible_name == target.accessible_name
+            and element.label == target.label
+            and element.form_name == target.form_name
+            and element.text_context == target.text_context
+            and element.semantic_fingerprint == target.semantic_fingerprint
+            and element.is_sensitive == target.is_sensitive
+        ]
+        if len(matches) != 1 or observation.url != target.observed_url:
+            raise ValueError("Browser target is missing, changed, or ambiguous on the current page.")
+        return session, observation
+
+    @staticmethod
+    def _receipt(
+        action: str,
+        target: BrowserTarget,
+        observation: BrowserObservation,
+        *,
+        value_hash: str | None = None,
+    ) -> dict[str, object]:
+        receipt: dict[str, object] = {
+            "action": action,
+            "target": target.to_payload(),
+            "observed_url": observation.url,
+            "observation_id": observation.observation_id,
+            "observed_at": observation.observed_at.isoformat(),
+        }
+        if value_hash is not None:
+            receipt["value_hash"] = value_hash
+        return receipt
+
+    async def _record_action(
+        self,
+        execution_id: str,
+        operation_id: str,
+        receipt: dict[str, object],
+    ) -> None:
+        await self.repository.patch_execution_context(
+            execution_id,
+            {
+                "browser": {
+                    "actions": {operation_id: receipt},
+                    "updated_at": datetime.now(timezone.utc).isoformat(),
+                }
+            },
+        )
 
     async def close_execution(self, execution_id: str) -> None:
         session = self._sessions.pop(execution_id, None)

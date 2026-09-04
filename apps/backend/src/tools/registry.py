@@ -6,6 +6,8 @@ from src.tools.tool_manager import ToolManager
 from src.services.browser_session_service import BrowserSessionService
 from src.tools.browser.browser_navigate_tool import BrowserNavigateTool
 from src.tools.browser.browser_observe_tool import BrowserObserveTool
+from src.tools.browser.browser_select_tool import BrowserSelectTool
+from src.tools.browser.browser_fill_tool import BrowserFillTool
 
 
 class ToolRegistry:
@@ -38,3 +40,5 @@ class ToolRegistry:
     ) -> None:
         manager.register(BrowserNavigateTool(browser_sessions))
         manager.register(BrowserObserveTool(browser_sessions))
+        manager.register(BrowserSelectTool(browser_sessions))
+        manager.register(BrowserFillTool(browser_sessions))

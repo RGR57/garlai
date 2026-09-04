@@ -47,6 +47,14 @@ class ExecutionPolicyTests(unittest.TestCase):
             self.assertFalse(result.execution_policy.is_consequential)
             self.assertTrue(result.execution_policy.retry_known_failure)
 
+    def test_browser_preparation_is_allowed_but_conservative(self):
+        for tool_name in ("browser_select", "browser_fill"):
+            result = self.permission.evaluate(tool_name, {})
+
+            self.assertEqual(result.decision, PermissionDecision.ALLOW)
+            self.assertTrue(result.execution_policy.is_consequential)
+            self.assertFalse(result.execution_policy.retry_known_failure)
+
 
 if __name__ == "__main__":
     unittest.main()

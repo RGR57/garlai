@@ -3,7 +3,7 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from src.models.browser import BrowserElement, BrowserObservation
+from src.models.browser import BrowserElement, BrowserObservation, BrowserTarget
 from src.models.durable_execution import ExecutionRun
 from src.repositories.sqlite_durable_execution_repository import (
     SQLiteDurableExecutionRepository,
@@ -83,3 +83,30 @@ class BrowserSessionServiceTests(unittest.IsolatedAsyncioTestCase):
             loaded.execution_context["browser"]["latest_observation"],
             observation.to_payload(),
         )
+
+    async def test_fill_persists_a_value_hash_but_never_the_literal_value(self):
+        service = BrowserSessionService(self.repository, self.provider, self.policy)
+        await service.navigate("run-a", self.url)
+        observation = await service.observe("run-a")
+        element = observation.elements[0]
+        target = BrowserTarget(
+            browser_session_id=observation.browser_session_id,
+            observation_id=observation.observation_id,
+            element_ref=element.element_ref,
+            observed_url=observation.url,
+            role=element.role,
+            accessible_name=element.accessible_name,
+            label=element.label,
+            form_name=element.form_name,
+            text_context=element.text_context,
+            semantic_fingerprint=element.semantic_fingerprint,
+            is_sensitive=element.is_sensitive,
+        )
+
+        receipt = await service.fill("run-a", target, "Ada Test", "op-fill")
+        loaded = await self.repository.load("run-a")
+
+        self.assertEqual(receipt["action"], "fill")
+        self.assertIn("value_hash", receipt)
+        self.assertNotIn("Ada Test", str(loaded.execution_context))
+        self.assertEqual(self.provider.actions, [("fill", target)])
