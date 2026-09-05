@@ -1,6 +1,8 @@
+import re
 from typing import Any
 
-from src.tools.base_tool import BaseTool
+from src.models.tool_result import ToolResult
+from src.tools.base_tool import BaseTool, ToolInvocationContext, ToolPreflight
 
 
 class ToolManager:
@@ -33,10 +35,14 @@ class ToolManager:
 
         return list(self._tools.values())
 
+    VARIABLE_REFERENCE = re.compile(r"^\{\{step\d+\}\}$")
+
     def validate_arguments(
         self,
         name: str,
         arguments: dict[str, Any],
+        *,
+        allow_variable_references: bool = False,
     ) -> tuple[bool, str | None]:
 
         tool = self.get(name)
@@ -131,6 +137,13 @@ class ToolManager:
             )
 
             if (
+                allow_variable_references
+                and isinstance(value, str)
+                and self.VARIABLE_REFERENCE.fullmatch(value)
+            ):
+                continue
+
+            if (
                 python_type is not None
                 and not isinstance(
                     value,
@@ -164,3 +177,25 @@ class ToolManager:
                 )
 
         return True, None
+
+    async def execute(
+        self,
+        name: str,
+        arguments: dict[str, Any],
+        invocation: ToolInvocationContext,
+    ) -> ToolResult:
+        tool = self.get(name)
+        if tool is None:
+            raise KeyError(f"Tool '{name}' is not registered.")
+        return await tool.execute_with_context(arguments, invocation)
+
+    async def preflight(
+        self,
+        name: str,
+        arguments: dict[str, Any],
+        invocation: ToolInvocationContext,
+    ) -> ToolPreflight:
+        tool = self.get(name)
+        if tool is None:
+            raise KeyError(f"Tool '{name}' is not registered.")
+        return await tool.preflight(arguments, invocation)

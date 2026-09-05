@@ -58,6 +58,11 @@ class PlanParser:
                 {},
             )
 
+            result_contract = raw_step.get(
+                "result_contract",
+                None,
+            )
+
             if not isinstance(action, str):
                 raise ValueError(
                     f"Plan step {index} has invalid action."
@@ -102,6 +107,11 @@ class PlanParser:
                     f"Plan step {index} has invalid input."
                 )
 
+            if result_contract is not None and not isinstance(result_contract, str):
+                raise ValueError(
+                    f"Plan step {index} has invalid result contract."
+                )
+
             if arguments is None:
                 arguments = {}
 
@@ -118,6 +128,7 @@ class PlanParser:
                     input=step_input,
                     tool=tool,
                     arguments=arguments,
+                    result_contract=result_contract,
                 )
             )
 

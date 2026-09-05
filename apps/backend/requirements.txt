@@ -6,3 +6,4 @@ litellm
 python-docx
 pypdf
 pytest
+playwright

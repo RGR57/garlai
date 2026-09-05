@@ -8,6 +8,7 @@ from src.models.execution_state import StepResult
 from src.models.plan import ExecutionPlan, PlanStep
 from src.models.reasoning import ReasoningChain
 from src.services.cognitive_pipeline import CognitivePipeline
+from src.services.objective_evaluator import ObjectiveEvaluation, ObjectiveEvaluationContext
 from src.services.plan_scorer import PlanScore
 from src.services.plan_validator import ValidationResult
 
@@ -150,6 +151,15 @@ class FakeResponseComposer:
         )
 
 
+class CapturingObjectiveEvaluator:
+    def __init__(self) -> None:
+        self.context = None
+
+    def evaluate(self, objective, execution_state, artifacts, context):
+        self.context = context
+        return ObjectiveEvaluation(True, "complete", (), (), ())
+
+
 class CognitivePipelineTests(
     unittest.IsolatedAsyncioTestCase
 ):
@@ -228,6 +238,31 @@ class CognitivePipelineTests(
         self.assertEqual(state.execution.variables["step1"], "first output")
         self.assertEqual(state.execution.variables["step2"], "second output")
         self.assertEqual(response.response, "second output")
+
+    async def test_execution_objective_evaluation_passes_runtime_evidence_to_the_pure_evaluator(self):
+        evaluator = CapturingObjectiveEvaluator()
+        pipeline = CognitivePipeline(
+            planner=None,
+            executor=PersistedPlanExecutor(),
+            reviewer=FakeReviewer(),
+            decision=AlwaysRetryDecision(),
+            reasoning=FakeReasoning(),
+            response_composer=FakeResponseComposer(),
+            candidate_plan_generator=PlannerMustNotRun(),
+            plan_validator=FakePlanValidator(),
+            plan_scorer=FakePlanScorer(),
+            objective_evaluator=evaluator,
+        )
+        context = ObjectiveEvaluationContext()
+
+        result = pipeline.evaluate_execution_objective(
+            "evaluate durable facts",
+            CognitiveState().execution,
+            context,
+        )
+
+        self.assertTrue(result.complete)
+        self.assertIs(evaluator.context, context)
 
 
 if __name__ == "__main__":

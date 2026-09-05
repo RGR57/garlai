@@ -102,3 +102,18 @@ def test_planner_prompt_contains_only_capability_eligible_tools():
     assert '"name": "calculator"' not in system_prompt
     assert '"name": "filesystem"' not in system_prompt
     assert "web_research: preserve source URLs" in system_prompt
+
+
+def test_browser_only_catalog_does_not_expose_software_or_research_tools():
+    manager = ToolManager()
+    for name in ("browser_navigate", "browser_observe", "terminal", "web_search"):
+        manager.register(NamedTool(name))
+
+    definitions = ToolCatalog(manager).get_tool_definitions(
+        eligible_tool_names=("browser_navigate", "browser_observe")
+    )
+
+    assert [definition["name"] for definition in definitions] == [
+        "browser_navigate",
+        "browser_observe",
+    ]

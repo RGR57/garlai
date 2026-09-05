@@ -5,6 +5,7 @@ from src.models.execution_state import (
 from src.repositories.durable_execution_repository import DurableExecutionRepository
 from src.services.executor_service import ExecutorService
 from src.tools.tool_manager import ToolManager
+from src.tools.base_tool import ToolInvocationContext
 from src.utils.logger import logger
 
 
@@ -25,6 +26,8 @@ class ApprovalService:
         execution_id: str,
         approval_id: str,
         state: ExecutionState | None = None,
+        *,
+        finalize: bool = True,
     ) -> StepResult:
         if self.durable_repository is None or self.executor is None:
             raise RuntimeError("Durable approval dependencies are not configured.")
@@ -44,6 +47,8 @@ class ApprovalService:
             [],
             state or ExecutionState(),
             approved_payload_hash=approved.payload_hash,
+            approval_id=approved.approval_id,
+            finalize=finalize,
         )
 
     async def reject_durable(
@@ -158,8 +163,14 @@ class ApprovalService:
 
         try:
 
-            tool_result = await tool.execute(
-                **arguments
+            tool_result = await self.tool_manager.execute(
+                tool_name,
+                arguments,
+                ToolInvocationContext(
+                    execution_id=None,
+                    step_id=step_id,
+                    operation_id=None,
+                ),
             )
 
         except Exception as exc:

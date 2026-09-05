@@ -3,11 +3,13 @@ from __future__ import annotations
 from typing import Protocol
 
 from src.models.durable_execution import (
+    ApprovalEvidence,
     ApprovalRequest,
     DurableStep,
     DurableStepStatus,
     ExecutionRun,
     OperationClaim,
+    OperationEvidence,
     OrphanedOperation,
 )
 
@@ -31,8 +33,23 @@ class DurableExecutionRepository(Protocol):
     async def load(self, execution_id: str) -> ExecutionRun:
         """Load and validate one durable execution aggregate."""
 
+    async def patch_execution_context(
+        self,
+        execution_id: str,
+        patch: dict,
+    ) -> ExecutionRun:
+        """Deep-merge constrained execution-scoped facts for a nonterminal run."""
+
     async def list_recoverable(self) -> list[ExecutionRun]:
         """List runs that may be inspected by an explicit recovery request."""
+
+    async def record_reconciliation(
+        self,
+        execution_id: str,
+        execution_context_patch: dict,
+        recovery_reason: str | None = None,
+    ) -> None:
+        """Atomically persist recovery observations and an optional stop reason."""
 
     async def delete_for_test(self, execution_id: str) -> None:
         """Remove one execution only for deterministic test cleanup."""
@@ -54,6 +71,7 @@ class DurableExecutionRepository(Protocol):
         result: dict | None = None,
         error: dict | None = None,
         artifact: dict | None = None,
+        execution_context_patch: dict | None = None,
     ) -> None:
         """Persist one proven terminal outcome for an already claimed operation."""
 
@@ -70,6 +88,14 @@ class DurableExecutionRepository(Protocol):
         self, execution_id: str
     ) -> list[OrphanedOperation]:
         """List committed intents that have no durable terminal outcome."""
+
+    async def recover_orphaned_operation_claim(
+        self,
+        execution_id: str,
+        step_id: int,
+        operation_id: str,
+    ) -> OperationClaim:
+        """Reconstruct the committed intent identity for a proven recovery outcome."""
 
     async def prepare_tool_step(
         self,
@@ -90,6 +116,7 @@ class DurableExecutionRepository(Protocol):
         *,
         result: dict | None = None,
         error: dict | None = None,
+        execution_context_patch: dict | None = None,
     ) -> None:
         """Persist the confirmed outcome of a claimed read-only step."""
 
@@ -112,6 +139,16 @@ class DurableExecutionRepository(Protocol):
     ) -> ApprovalRequest | None:
         """Load the sole frozen approval that keeps this run paused, if any."""
 
+    async def list_approval_evidence(
+        self, execution_id: str
+    ) -> list[ApprovalEvidence]:
+        """Load bounded immutable approval facts for objective evaluation."""
+
+    async def list_operation_evidence(
+        self, execution_id: str
+    ) -> list[OperationEvidence]:
+        """Load bounded immutable operation facts for objective evaluation."""
+
     async def approve(
         self, execution_id: str, approval_id: str, payload_hash: str
     ) -> ApprovalRequest:
@@ -119,3 +156,11 @@ class DurableExecutionRepository(Protocol):
 
     async def reject(self, execution_id: str, approval_id: str) -> None:
         """Reject one frozen approval without invoking its operation."""
+
+    async def invalidate_approval(
+        self,
+        execution_id: str,
+        approval_id: str,
+        reason: str,
+    ) -> None:
+        """Preserve an approved-but-stale operation as a recovery requirement."""

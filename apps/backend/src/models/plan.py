@@ -20,6 +20,9 @@ class PlanStep:
         default_factory=dict
     )
 
+    # Optional constrained JSON output for a tool-free LLM step.
+    result_contract: str | None = None
+
 
 @dataclass
 class ExecutionPlan:

@@ -80,6 +80,60 @@ def test_parser_accepts_markdown_fenced_json_plan():
     }
 
 
+def test_parser_preserves_browser_result_contract_for_an_llm_step():
+    plan = parse_plan(
+        """
+        {
+          "steps": [
+            {
+              "action": "select the observed plan",
+              "tool": null,
+              "input": "{{step1}}",
+              "arguments": {},
+              "result_contract": "browser_target"
+            }
+          ]
+        }
+        """
+    )
+
+    assert plan.steps[0].result_contract == "browser_target"
+
+
+def test_validator_rejects_unknown_or_tool_bound_result_contracts():
+    manager = ToolManager()
+    manager.register(CalculatorTool())
+    validator = PlanValidator(manager)
+    plan = parse_plan(
+        """
+        {
+          "steps": [
+            {
+              "action": "calculate result",
+              "tool": "calculator",
+              "input": "2 + 2",
+              "arguments": {"query": "2 + 2"},
+              "result_contract": "browser_target"
+            },
+            {
+              "action": "respond",
+              "tool": null,
+              "input": "hello",
+              "arguments": {},
+              "result_contract": "arbitrary_json"
+            }
+          ]
+        }
+        """
+    )
+
+    result = validator.validate(plan, CognitiveState(objective="calculate 2 + 2"))
+
+    assert result.valid is False
+    assert "only valid for tool-free" in result.errors[0]
+    assert "unknown result contract" in result.errors[1]
+
+
 def test_parser_rejects_malformed_json():
     with pytest.raises(
         ValueError,

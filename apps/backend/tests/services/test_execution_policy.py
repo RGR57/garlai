@@ -39,6 +39,29 @@ class ExecutionPolicyTests(unittest.TestCase):
         self.assertTrue(result.execution_policy.is_consequential)
         self.assertFalse(result.execution_policy.retry_known_failure)
 
+    def test_browser_navigation_and_observation_are_allowed_read_oriented_actions(self):
+        for tool_name in ("browser_navigate", "browser_observe"):
+            result = self.permission.evaluate(tool_name, {})
+
+            self.assertEqual(result.decision, PermissionDecision.ALLOW)
+            self.assertFalse(result.execution_policy.is_consequential)
+            self.assertTrue(result.execution_policy.retry_known_failure)
+
+    def test_browser_preparation_is_allowed_but_conservative(self):
+        for tool_name in ("browser_select", "browser_fill"):
+            result = self.permission.evaluate(tool_name, {})
+
+            self.assertEqual(result.decision, PermissionDecision.ALLOW)
+            self.assertTrue(result.execution_policy.is_consequential)
+            self.assertFalse(result.execution_policy.retry_known_failure)
+
+    def test_browser_submit_requires_high_risk_approval(self):
+        result = self.permission.evaluate("browser_submit", {})
+
+        self.assertEqual(result.decision, PermissionDecision.REQUIRE_APPROVAL)
+        self.assertTrue(result.execution_policy.is_consequential)
+        self.assertFalse(result.execution_policy.retry_known_failure)
+
 
 if __name__ == "__main__":
     unittest.main()

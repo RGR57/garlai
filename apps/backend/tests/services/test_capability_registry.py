@@ -55,3 +55,28 @@ def test_unknown_capability_is_not_eligible():
 
     assert registry.availability("unknown") is None
     assert registry.eligible_tool_names(("unknown",)) == ()
+
+
+def test_web_operation_exposes_only_registered_browser_tools():
+    manager = ToolManager()
+    for name in (
+        "browser_navigate",
+        "browser_observe",
+        "browser_select",
+        "browser_fill",
+    ):
+        manager.register(NamedTool(name))
+    registry = CapabilityRegistry(manager)
+
+    availability = registry.availability("web_operation")
+
+    assert availability.available
+    assert registry.eligible_tool_names(("web_operation",)) == (
+        "browser_navigate",
+        "browser_observe",
+        "browser_select",
+        "browser_fill",
+    )
+    assert "result_contract=browser_target" in registry.planner_description(
+        ("web_operation",)
+    )

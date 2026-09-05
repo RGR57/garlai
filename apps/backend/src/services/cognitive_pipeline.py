@@ -51,7 +51,11 @@ from src.services.capability_resolver import (
     CapabilityResolver,
     CapabilitySelection,
 )
-from src.services.objective_evaluator import ObjectiveEvaluation, ObjectiveEvaluator
+from src.services.objective_evaluator import (
+    ObjectiveEvaluation,
+    ObjectiveEvaluationContext,
+    ObjectiveEvaluator,
+)
 
 class CognitivePipeline:
 
@@ -103,10 +107,16 @@ class CognitivePipeline:
         self,
         objective: str,
         execution_state: ExecutionState,
+        context: ObjectiveEvaluationContext | None = None,
     ) -> ObjectiveEvaluation | None:
         if self.objective_evaluator is None:
             return None
-        return self.objective_evaluator.evaluate(objective, execution_state, [])
+        return self.objective_evaluator.evaluate(
+            objective,
+            execution_state,
+            [],
+            context,
+        )
 
     def resolve_capabilities(self, objective: str) -> CapabilitySelection | None:
         if self.capability_resolver is None:

@@ -31,6 +31,9 @@ coverage/
 .vscode/
 .idea/
 
+# Local SDD task ledger
+.superpowers/
+
 # OS
 .DS_Store
 Thumbs.db
