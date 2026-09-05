@@ -68,6 +68,28 @@ class ApprovalEventType(str, Enum):
     INVALIDATED = "invalidated"
 
 
+@dataclass(frozen=True)
+class ApprovalEvidence:
+    """One immutable approval-journal fact, safe to project into evaluation."""
+
+    execution_id: str
+    step_id: int
+    operation_id: str
+    payload_hash: str
+    event_type: str
+
+
+@dataclass(frozen=True)
+class OperationEvidence:
+    """One immutable operation-journal fact, safe to project into evaluation."""
+
+    execution_id: str
+    step_id: int
+    operation_id: str
+    payload_hash: str
+    event_type: str
+
+
 RUN_STATE_TRANSITIONS: dict[ExecutionRunStatus, frozenset[ExecutionRunStatus]] = {
     ExecutionRunStatus.PLANNING: frozenset(
         {ExecutionRunStatus.RUNNING, ExecutionRunStatus.FAILED}

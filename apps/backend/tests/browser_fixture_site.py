@@ -16,6 +16,7 @@ class LocalMarketplace:
         {"name": "Pro", "price": "$20/month", "sso": "Yes", "users": 10},
         {"name": "Business", "price": "$30/month", "sso": "Yes", "users": 25},
     )
+    page_notice: str = ""
     _server: ThreadingHTTPServer | None = field(init=False, default=None)
     _thread: Thread | None = field(init=False, default=None)
     _commit_count: int = field(init=False, default=0)
@@ -101,7 +102,8 @@ class LocalMarketplace:
             )
             for plan in self.plans
         )
-        return f"<html><head><title>Marketplace</title></head><body><main><h1>Plans</h1>{cards}</main></body></html>"
+        notice = f"<p>{escape(self.page_notice)}</p>" if self.page_notice else ""
+        return f"<html><head><title>Marketplace</title></head><body><main><h1>Plans</h1>{notice}{cards}</main></body></html>"
 
     def _review_page(self, plan_slug: str) -> str:
         plan = next(

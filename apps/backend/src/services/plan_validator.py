@@ -324,6 +324,7 @@ class PlanValidator:
                     self.tool_manager.validate_arguments(
                         step.tool,
                         arguments,
+                        allow_variable_references=True,
                     )
                 )
 

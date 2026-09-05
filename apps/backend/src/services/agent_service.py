@@ -391,13 +391,29 @@ class AgentService:
                         execution_id,
                         approval_id,
                         decision.execution_state,
+                        finalize=False,
                     )
                 except (KeyError, ValueError) as exc:
                     raise GARLException(str(exc), 409) from exc
-                run = (await self.durable_execution_service.prepare_resume(execution_id)).run
+                latest = await self.durable_execution_service.prepare_resume(execution_id)
+                evaluation = self.pipeline.evaluate_execution_objective(
+                    latest.run.objective,
+                    latest.execution_state,
+                    await self.durable_execution_service.objective_evaluation_context(
+                        execution_id
+                    ),
+                )
+                response = str(result.output) if result.success else (result.error or "Execution failed.")
+                if evaluation is not None and not latest.may_execute:
+                    if evaluation.complete:
+                        await self.durable_execution_service.complete_if_finished(execution_id)
+                    elif latest.status is ExecutionRunStatus.RUNNING:
+                        await self.durable_execution_service.fail_if_finished(execution_id)
+                        response = "Objective incomplete: " + "; ".join(evaluation.gaps)
+                    latest = await self.durable_execution_service.prepare_resume(execution_id)
                 return self._durable_response(
-                    str(result.output) if result.success else (result.error or "Execution failed."),
-                    run,
+                    response,
+                    latest.run,
                 )
             if normalized in self.REJECTION_COMMANDS:
                 if approval_id is None:
@@ -429,9 +445,13 @@ class AgentService:
                 finalize=False,
             )
             latest = await self.durable_execution_service.prepare_resume(execution_id)
+            evaluation_context = await self.durable_execution_service.objective_evaluation_context(
+                execution_id
+            )
             evaluation = self.pipeline.evaluate_execution_objective(
                 latest.run.objective,
                 latest.execution_state,
+                evaluation_context,
             )
             if evaluation is not None and not latest.may_execute:
                 if evaluation.complete:

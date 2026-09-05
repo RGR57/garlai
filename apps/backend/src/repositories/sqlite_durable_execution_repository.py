@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import TypeVar
 
 from src.models.durable_execution import (
+    ApprovalEvidence,
     DurableStateCorruptionError,
     ApprovalEventType,
     ApprovalPayloadMismatchError,
@@ -19,6 +20,7 @@ from src.models.durable_execution import (
     ExecutionRun,
     ExecutionRunStatus,
     OperationClaim,
+    OperationEvidence,
     OperationEventType,
     OrphanedOperation,
     canonical_payload_hash,
@@ -124,6 +126,22 @@ class SQLiteDurableExecutionRepository(DurableExecutionRepository):
         operation_id: str,
     ) -> list[OperationEventType]:
         return await self._run(lambda: self._operation_events(operation_id))
+
+    async def list_approval_evidence(
+        self,
+        execution_id: str,
+    ) -> list[ApprovalEvidence]:
+        return await self._run(
+            lambda: self._list_approval_evidence(execution_id)
+        )
+
+    async def list_operation_evidence(
+        self,
+        execution_id: str,
+    ) -> list[OperationEvidence]:
+        return await self._run(
+            lambda: self._list_operation_evidence(execution_id)
+        )
 
     async def record_operation_outcome(
         self,
@@ -1435,6 +1453,62 @@ class SQLiteDurableExecutionRepository(DurableExecutionRepository):
         except Exception:
             connection.rollback()
             raise
+        finally:
+            connection.close()
+
+    def _list_approval_evidence(
+        self,
+        execution_id: str,
+    ) -> list[ApprovalEvidence]:
+        connection = self._connect()
+        try:
+            rows = connection.execute(
+                """
+                SELECT execution_id, step_id, operation_id, payload_hash, event_type
+                FROM approval_journal
+                WHERE execution_id = ?
+                ORDER BY occurred_at, rowid
+                """,
+                (execution_id,),
+            ).fetchall()
+            return [
+                ApprovalEvidence(
+                    execution_id=row["execution_id"],
+                    step_id=row["step_id"],
+                    operation_id=row["operation_id"],
+                    payload_hash=row["payload_hash"],
+                    event_type=row["event_type"],
+                )
+                for row in rows
+            ]
+        finally:
+            connection.close()
+
+    def _list_operation_evidence(
+        self,
+        execution_id: str,
+    ) -> list[OperationEvidence]:
+        connection = self._connect()
+        try:
+            rows = connection.execute(
+                """
+                SELECT execution_id, step_id, operation_id, payload_hash, event_type
+                FROM operation_journal
+                WHERE execution_id = ?
+                ORDER BY occurred_at, rowid
+                """,
+                (execution_id,),
+            ).fetchall()
+            return [
+                OperationEvidence(
+                    execution_id=row["execution_id"],
+                    step_id=row["step_id"],
+                    operation_id=row["operation_id"],
+                    payload_hash=row["payload_hash"],
+                    event_type=row["event_type"],
+                )
+                for row in rows
+            ]
         finally:
             connection.close()
 

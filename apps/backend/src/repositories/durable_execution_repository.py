@@ -3,11 +3,13 @@ from __future__ import annotations
 from typing import Protocol
 
 from src.models.durable_execution import (
+    ApprovalEvidence,
     ApprovalRequest,
     DurableStep,
     DurableStepStatus,
     ExecutionRun,
     OperationClaim,
+    OperationEvidence,
     OrphanedOperation,
 )
 
@@ -136,6 +138,16 @@ class DurableExecutionRepository(Protocol):
         self, execution_id: str
     ) -> ApprovalRequest | None:
         """Load the sole frozen approval that keeps this run paused, if any."""
+
+    async def list_approval_evidence(
+        self, execution_id: str
+    ) -> list[ApprovalEvidence]:
+        """Load bounded immutable approval facts for objective evaluation."""
+
+    async def list_operation_evidence(
+        self, execution_id: str
+    ) -> list[OperationEvidence]:
+        """Load bounded immutable operation facts for objective evaluation."""
 
     async def approve(
         self, execution_id: str, approval_id: str, payload_hash: str

@@ -1,3 +1,4 @@
+import re
 from typing import Any
 
 from src.models.tool_result import ToolResult
@@ -34,10 +35,14 @@ class ToolManager:
 
         return list(self._tools.values())
 
+    VARIABLE_REFERENCE = re.compile(r"^\{\{step\d+\}\}$")
+
     def validate_arguments(
         self,
         name: str,
         arguments: dict[str, Any],
+        *,
+        allow_variable_references: bool = False,
     ) -> tuple[bool, str | None]:
 
         tool = self.get(name)
@@ -130,6 +135,13 @@ class ToolManager:
             python_type = type_map.get(
                 expected_type
             )
+
+            if (
+                allow_variable_references
+                and isinstance(value, str)
+                and self.VARIABLE_REFERENCE.fullmatch(value)
+            ):
+                continue
 
             if (
                 python_type is not None

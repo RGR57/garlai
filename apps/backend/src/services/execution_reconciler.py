@@ -151,7 +151,7 @@ class BrowserExecutionReconciler:
         for receipt in actions.values():
             if (
                 not isinstance(receipt, dict)
-                or receipt.get("action") not in {"select", "fill"}
+                or receipt.get("action") != "fill"
             ):
                 continue
             try:

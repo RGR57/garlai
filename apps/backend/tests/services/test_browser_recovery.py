@@ -22,6 +22,7 @@ from src.services.recovery_service import RecoveryService
 
 
 URL = "http://127.0.0.1:8123/signup"
+REVIEW_URL = "http://127.0.0.1:8123/review"
 
 
 class RecordingFakeBrowserProvider(FakeBrowserProvider):
@@ -36,6 +37,7 @@ class RecordingFakeBrowserProvider(FakeBrowserProvider):
 
 def _observation(
     *,
+    url: str = URL,
     name: str = "Business signup name",
     text: str = "Business - $30/month - supports SSO - 10 users",
 ) -> BrowserObservation:
@@ -51,7 +53,7 @@ def _observation(
     return BrowserObservation(
         observation_id="signup-observation",
         browser_session_id="fixture-session",
-        url=URL,
+        url=url,
         title="Business signup",
         visible_text=text,
         elements=(element,),
@@ -129,6 +131,47 @@ async def test_fresh_recovery_reobserves_prepared_state_without_replaying_fill(t
     assert after_restart_provider.visits == [URL]
     assert after_restart_provider.actions == []
     assert loaded.execution_context["browser"]["reconciliation"]["observation"]["url"] == URL
+
+
+@pytest.mark.anyio
+async def test_selection_persists_the_post_action_destination_for_recovery(tmp_path):
+    class NavigatingSelectProvider(FakeBrowserProvider):
+        async def select(self, session, target):
+            await super().select(session, target)
+            self._session(session).current_url = REVIEW_URL
+
+    execution_id = "run-selection-destination"
+    initial = _observation()
+    target = _target(execution_id, initial)
+    step = DurableStep(
+        step_id=1,
+        ordinal=0,
+        action="choose Business",
+        tool="browser_select",
+        arguments={"target": target.to_payload()},
+        operation_id="operation-select",
+        payload_hash="select-payload",
+    )
+    repository = await _repository(tmp_path, execution_id, step)
+    provider = NavigatingSelectProvider({URL: initial, REVIEW_URL: _observation(url=REVIEW_URL)})
+    sessions = _sessions(repository, provider)
+    await sessions.navigate(execution_id, URL)
+
+    receipt = await sessions.select(execution_id, target, "operation-select")
+    loaded = await repository.load(execution_id)
+    fresh_provider = RecordingFakeBrowserProvider({REVIEW_URL: _observation(url=REVIEW_URL)})
+    decision = await RecoveryService(
+        repository,
+        reconciler=BrowserExecutionReconciler(
+            repository,
+            _sessions(repository, fresh_provider),
+        ),
+    ).prepare_resume(execution_id)
+
+    assert receipt["observed_url"] == REVIEW_URL
+    assert loaded.execution_context["browser"]["last_verified_url"] == REVIEW_URL
+    assert fresh_provider.visits == [REVIEW_URL]
+    assert decision.may_execute is True
 
 
 @pytest.mark.anyio

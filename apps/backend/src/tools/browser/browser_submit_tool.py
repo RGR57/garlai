@@ -40,8 +40,23 @@ class BrowserSubmitTool(BaseTool):
     async def execute_with_context(self, arguments: dict, invocation: ToolInvocationContext) -> ToolResult:
         execution_id, operation_id = self._identities(invocation)
         receipt = await self.browser_sessions.submit(
-            execution_id, BrowserTarget.from_payload(arguments["target"]), operation_id
+            execution_id,
+            BrowserTarget.from_payload(arguments["target"]),
+            operation_id,
+            arguments.get("expected_success_text"),
         )
+        if (
+            isinstance(arguments.get("expected_success_text"), str)
+            and arguments["expected_success_text"]
+            and "confirmation" not in receipt
+        ):
+            return ToolResult(
+                success=False,
+                tool_name=self.name,
+                output={"receipt": receipt},
+                metadata={"error": "Browser submit did not prove the expected external success."},
+                invocation_outcome=ToolInvocationOutcome.UNKNOWN,
+            )
         return ToolResult(success=True, tool_name=self.name, output={"receipt": receipt}, invocation_outcome=ToolInvocationOutcome.CONFIRMED)
 
     @staticmethod

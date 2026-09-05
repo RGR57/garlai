@@ -10,6 +10,10 @@ from src.models.durable_execution import (
 from src.models.plan import ExecutionPlan
 from src.repositories.durable_execution_repository import DurableExecutionRepository
 from src.services.execution_reconciler import ExecutionReconciler
+from src.services.objective_evaluator import (
+    ExternalConfirmationEvidence,
+    ObjectiveEvaluationContext,
+)
 from src.services.recovery_service import RecoveryDecision, RecoveryService
 
 
@@ -58,6 +62,41 @@ class DurableExecutionService:
 
     async def prepare_resume(self, execution_id: str) -> RecoveryDecision:
         return await self.recovery_service.prepare_resume(execution_id)
+
+    async def objective_evaluation_context(
+        self,
+        execution_id: str,
+    ) -> ObjectiveEvaluationContext:
+        """Project only bounded, authoritative durable facts for evaluation."""
+        run = await self.repository.load(execution_id)
+        confirmations: list[ExternalConfirmationEvidence] = []
+        for step in run.steps:
+            if step.operation_id is None or step.payload_hash is None or not step.result:
+                continue
+            output = step.result.get("output")
+            receipt = output.get("receipt") if isinstance(output, dict) else None
+            confirmation = receipt.get("confirmation") if isinstance(receipt, dict) else None
+            if not isinstance(confirmation, dict):
+                continue
+            observation_id = confirmation.get("observation_id")
+            confirmation_hash = confirmation.get("confirmation_hash")
+            if not isinstance(observation_id, str) or not isinstance(confirmation_hash, str):
+                continue
+            confirmations.append(
+                ExternalConfirmationEvidence(
+                    execution_id=run.execution_id,
+                    step_id=step.step_id,
+                    operation_id=step.operation_id,
+                    payload_hash=step.payload_hash,
+                    observation_id=observation_id,
+                    confirmation_hash=confirmation_hash,
+                )
+            )
+        return ObjectiveEvaluationContext(
+            approvals=tuple(await self.repository.list_approval_evidence(execution_id)),
+            operations=tuple(await self.repository.list_operation_evidence(execution_id)),
+            confirmations=tuple(confirmations),
+        )
 
     async def complete_if_finished(self, execution_id: str) -> bool:
         return await self.repository.complete_if_finished(execution_id)

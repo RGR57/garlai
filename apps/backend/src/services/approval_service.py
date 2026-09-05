@@ -26,6 +26,8 @@ class ApprovalService:
         execution_id: str,
         approval_id: str,
         state: ExecutionState | None = None,
+        *,
+        finalize: bool = True,
     ) -> StepResult:
         if self.durable_repository is None or self.executor is None:
             raise RuntimeError("Durable approval dependencies are not configured.")
@@ -46,6 +48,7 @@ class ApprovalService:
             state or ExecutionState(),
             approved_payload_hash=approved.payload_hash,
             approval_id=approved.approval_id,
+            finalize=finalize,
         )
 
     async def reject_durable(

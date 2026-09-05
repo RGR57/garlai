@@ -119,10 +119,11 @@ class BrowserSessionService:
         target: BrowserTarget,
         operation_id: str,
     ) -> dict[str, object]:
-        session, observation = await self._resolve_target(execution_id, target, operation_id)
+        session, _ = await self._resolve_target(execution_id, target, operation_id)
         await self.provider.select(session.provider_session, target)
+        observation = await self.provider.observe(session.provider_session)
         receipt = self._receipt("select", target, observation)
-        await self._record_action(execution_id, operation_id, receipt)
+        await self._record_action(execution_id, operation_id, receipt, observation)
         return receipt
 
     async def fill(
@@ -136,15 +137,16 @@ class BrowserSessionService:
             raise ValueError("Browser fill refuses a sensitive field.")
         if not isinstance(value, str) or not value:
             raise ValueError("Browser fill value must be a non-empty string.")
-        session, observation = await self._resolve_target(execution_id, target, operation_id)
+        session, _ = await self._resolve_target(execution_id, target, operation_id)
         await self.provider.fill(session.provider_session, target, value)
+        observation = await self.provider.observe(session.provider_session)
         receipt = self._receipt(
             "fill",
             target,
             observation,
             value_hash=hashlib.sha256(value.encode("utf-8")).hexdigest(),
         )
-        await self._record_action(execution_id, operation_id, receipt)
+        await self._record_action(execution_id, operation_id, receipt, observation)
         return receipt
 
     async def preflight_submit(
@@ -164,14 +166,17 @@ class BrowserSessionService:
         execution_id: str,
         target: BrowserTarget,
         operation_id: str,
+        expected_success_text: str | None = None,
     ) -> dict[str, object]:
-        session = await self.get_or_create(execution_id)
-        if target.browser_session_id != session.browser_session_id:
-            raise ValueError("Browser target belongs to a different execution session.")
+        # Revalidate at dispatch time as the page can change after approval preflight.
+        session, _ = await self._resolve_target(execution_id, target, operation_id)
         await self.provider.submit(session.provider_session, target)
         observation = await self.provider.observe(session.provider_session)
         receipt = self._receipt("submit", target, observation)
-        await self._record_action(execution_id, operation_id, receipt)
+        confirmation = self._confirmation(observation, expected_success_text)
+        if confirmation is not None:
+            receipt["confirmation"] = confirmation
+        await self._record_action(execution_id, operation_id, receipt, observation)
         return receipt
 
     async def _resolve_target(
@@ -227,17 +232,46 @@ class BrowserSessionService:
             receipt["value_hash"] = value_hash
         return receipt
 
+    @staticmethod
+    def _confirmation(
+        observation: BrowserObservation,
+        expected_success_text: str | None,
+    ) -> dict[str, str] | None:
+        if (
+            not isinstance(expected_success_text, str)
+            or not expected_success_text
+            or expected_success_text not in observation.visible_text
+        ):
+            return None
+        confirmation_payload = "\x1f".join(
+            (
+                expected_success_text,
+                observation.observation_id,
+                observation.url,
+                observation.page_fingerprint,
+            )
+        )
+        return {
+            "observation_id": observation.observation_id,
+            "confirmation_hash": hashlib.sha256(
+                confirmation_payload.encode("utf-8")
+            ).hexdigest(),
+        }
+
     async def _record_action(
         self,
         execution_id: str,
         operation_id: str,
         receipt: dict[str, object],
+        observation: BrowserObservation,
     ) -> None:
         await self.repository.patch_execution_context(
             execution_id,
             {
                 "browser": {
                     "actions": {operation_id: receipt},
+                    "last_verified_url": observation.url,
+                    "latest_observation": observation.to_payload(),
                     "updated_at": datetime.now(timezone.utc).isoformat(),
                 }
             },

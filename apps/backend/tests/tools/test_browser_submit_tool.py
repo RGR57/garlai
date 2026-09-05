@@ -26,8 +26,8 @@ class RecordingBrowserSessionService:
         self.preflight_calls.append((execution_id, target, operation_id))
         return self.ready, "target changed" if not self.ready else None
 
-    async def submit(self, execution_id, target, operation_id):
-        self.submit_calls.append((execution_id, target, operation_id))
+    async def submit(self, execution_id, target, operation_id, expected_success_text=None):
+        self.submit_calls.append((execution_id, target, operation_id, expected_success_text))
         return {"action": "submit", "target": target.to_payload()}
 
 

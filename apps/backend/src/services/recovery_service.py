@@ -60,7 +60,18 @@ class RecoveryService:
             orphaned_operations = await self.repository.list_orphaned_operations(
                 execution_id
             )
-            if self.reconciler is not None:
+            all_steps_completed = bool(run.steps) and all(
+                step.status is DurableStepStatus.COMPLETED
+                for step in run.steps
+            )
+            has_confirmed_browser_submit = any(
+                step.tool == "browser_submit"
+                and step.status is DurableStepStatus.COMPLETED
+                for step in run.steps
+            )
+            if self.reconciler is not None and not (
+                all_steps_completed and has_confirmed_browser_submit
+            ):
                 await self.reconciler.reconcile(run, orphaned_operations)
                 run = await self.repository.load(execution_id)
             if run.status is ExecutionRunStatus.RUNNING:

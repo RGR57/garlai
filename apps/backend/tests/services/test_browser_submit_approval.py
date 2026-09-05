@@ -79,11 +79,20 @@ def _target(execution_id: str, observation: BrowserObservation) -> BrowserTarget
     )
 
 
-async def _runtime(tmp_path, execution_id: str, target: BrowserTarget):
+async def _runtime(
+    tmp_path,
+    execution_id: str,
+    target: BrowserTarget,
+    *,
+    provider: FakeBrowserProvider | None = None,
+    expected_success_text: str | None = None,
+):
     repository = SQLiteDurableExecutionRepository(tmp_path / f"{execution_id}.sqlite3")
     await repository.initialize()
     await repository.create_planning_run(ExecutionRun(execution_id=execution_id, objective="Confirm signup"))
     arguments = {"target": target.to_payload()}
+    if expected_success_text is not None:
+        arguments["expected_success_text"] = expected_success_text
     await repository.persist_validated_plan(
         execution_id,
         [
@@ -98,7 +107,7 @@ async def _runtime(tmp_path, execution_id: str, target: BrowserTarget):
             )
         ],
     )
-    provider = FakeBrowserProvider({URL: _observation(), CHANGED_URL: _observation(url=CHANGED_URL)})
+    provider = provider or FakeBrowserProvider({URL: _observation(), CHANGED_URL: _observation(url=CHANGED_URL)})
     sessions = BrowserSessionService(
         repository,
         provider,
@@ -142,6 +151,31 @@ async def test_approved_submit_dispatches_exactly_once_and_persists_success(tmp_
         OperationEventType.INTENT_RECORDED,
         OperationEventType.COMPLETED,
     ]
+
+
+@pytest.mark.anyio
+async def test_approved_submit_persists_external_confirmation_after_provider_dispatch(tmp_path):
+    class ConfirmingProvider(FakeBrowserProvider):
+        async def submit(self, session, target):
+            await super().submit(session, target)
+            self.set_page(URL, _observation(name="Signup complete", text="Signup complete"))
+
+    target = _target("run-confirmed", _observation())
+    repository, provider, _sessions, executor, approvals = await _runtime(
+        tmp_path,
+        "run-confirmed",
+        target,
+        provider=ConfirmingProvider({URL: _observation()}),
+        expected_success_text="Signup complete",
+    )
+    approval = await _request_approval(executor, repository, "run-confirmed")
+
+    result = await approvals.approve_durable("run-confirmed", approval.approval_id)
+
+    confirmation = result.output["receipt"]["confirmation"]
+    assert confirmation["observation_id"]
+    assert confirmation["confirmation_hash"]
+    assert [action for action, _target in provider.actions] == ["submit"]
 
 
 @pytest.mark.anyio
